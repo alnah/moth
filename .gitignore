@@ -1,0 +1,55 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+.Spotlight-V100/
+.Trashes/
+._*
+
+# Windows
+$RECYCLE.BIN/
+Desktop.ini
+Thumbs.db
+
+# Linux
+.directory
+.Trash-*/
+.fuse_hidden*
+.nfs*
+
+# Temporary / backup files
+*~
+*.bak
+*.orig
+*.rej
+*.tmp
+
+# Editors
+.fleet/
+.history/
+.idea/
+.project
+.settings/
+.vs/
+.vscode/
+.zed/
+*.code-workspace
+
+# Logs
+*.log
+/*.jsonl
+
+# Go
+*.test
+.coverprofile
+bin/
+cover.out
+coverage.out
+
+# Agents
+.claude/
+.codex/
+.cursor/
+.gemini/
+.opencode/
+.pi/
