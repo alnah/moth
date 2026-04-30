@@ -45,6 +45,7 @@ func NewRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "moth",
 		Short:         "Moth content discovery CLI",
+		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,6 +71,8 @@ func NewRootCommand() *cobra.Command {
 	flags.IntVar(&options.Limits.Retries, "retries", options.Limits.Retries, "retry count")
 	flags.DurationVar(&options.Limits.RetryBase, "retry-base", options.Limits.RetryBase, "base retry delay")
 	flags.DurationVar(&options.Limits.RetryMax, "retry-max", options.Limits.RetryMax, "maximum retry delay")
+
+	addToolsCommand(cmd, options)
 
 	return cmd
 }
