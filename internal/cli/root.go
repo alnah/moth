@@ -22,7 +22,6 @@ type rootFlags struct {
 }
 
 type outputFlags struct {
-	JSON       bool
 	Pretty     bool
 	OutputPath string
 }
@@ -59,8 +58,11 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 
+	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return writeCommandError(cmd, options.Output, "invalid_arguments", err.Error(), err, "write command parse error")
+	})
+
 	flags := cmd.PersistentFlags()
-	flags.BoolVar(&options.Output.JSON, "json", false, "write structured JSON output")
 	flags.BoolVar(&options.Output.Pretty, "pretty", false, "pretty-print JSON output")
 	flags.DurationVar(&options.Limits.Timeout, "timeout", options.Limits.Timeout, "command timeout")
 	flags.IntVar(&options.Limits.MaxResults, "max-results", options.Limits.MaxResults, "maximum result count")
@@ -84,24 +86,32 @@ func newRootFlags() *rootFlags {
 }
 
 func writeUnknownCommandError(cmd *cobra.Command, output outputFlags, commandName string) error {
+	commandErr := fmt.Errorf("%w: %s", ErrUnknownCommand, commandName)
 	message := fmt.Sprintf("unknown command: %s", commandName)
-	if output.JSON {
-		document := errorDocument{
-			Type: "error",
-			Error: errorDocumentBody{
-				Code:    "unknown_command",
-				Message: message,
-			},
-			Warnings: []string{},
-		}
-		if err := writeJSON(cmd.ErrOrStderr(), output.Pretty, document); err != nil {
-			return fmt.Errorf("write unknown command error: %w", err)
-		}
-	} else {
-		cmd.PrintErrln(message)
+	return writeCommandError(cmd, output, "unknown_command", message, commandErr, "write unknown command error")
+}
+
+func writeCommandError(
+	cmd *cobra.Command,
+	output outputFlags,
+	code string,
+	message string,
+	commandErr error,
+	writeContext string,
+) error {
+	document := errorDocument{
+		Type: "error",
+		Error: errorDocumentBody{
+			Code:    code,
+			Message: message,
+		},
+		Warnings: []string{},
+	}
+	if err := writeJSON(cmd.ErrOrStderr(), output.Pretty, document); err != nil {
+		return fmt.Errorf("%s: %w", writeContext, err)
 	}
 
-	return fmt.Errorf("%w: %s", ErrUnknownCommand, commandName)
+	return commandErr
 }
 
 func writeJSON(writer io.Writer, pretty bool, value any) error {

@@ -34,7 +34,7 @@ func TestRootCommandWithoutArgsShowsHelp(t *testing.T) {
 }
 
 func TestRootCommandJSONErrorShape(t *testing.T) {
-	stdout, stderr, err := executeRootCommand("--json", "missing-command")
+	stdout, stderr, err := executeRootCommand("missing-command")
 	if err == nil {
 		t.Fatal("execute unknown command error = nil, want stable JSON error")
 	}
@@ -76,7 +76,7 @@ func TestRootCommandJSONErrorShape(t *testing.T) {
 }
 
 func TestRootCommandPrettyJSONError(t *testing.T) {
-	stdout, stderr, err := executeRootCommand("--json", "--pretty", "missing-command")
+	stdout, stderr, err := executeRootCommand("--pretty", "missing-command")
 	if err == nil {
 		t.Fatal("execute unknown command error = nil, want stable JSON error")
 	}
@@ -95,16 +95,36 @@ func TestRootCommandPrettyJSONError(t *testing.T) {
 	}
 }
 
-func TestRootCommandPlainUnknownCommandWritesTextError(t *testing.T) {
-	stdout, stderr, err := executeRootCommand("missing-command")
+func TestRootCommandRejectsJSONFlag(t *testing.T) {
+	stdout, stderr, err := executeRootCommand("--json")
 	if err == nil {
-		t.Fatal("execute unknown command error = nil, want error")
+		t.Fatal("execute --json error = nil, want unsupported flag error")
 	}
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty stdout", stdout)
 	}
-	if !strings.Contains(stderr, "unknown command: missing-command") {
-		t.Fatalf("stderr = %q, want unknown command message", stderr)
+	if !strings.Contains(err.Error(), "unknown flag: --json") {
+		t.Fatalf("error = %v, want unsupported --json flag", err)
+	}
+
+	payload := strings.TrimSpace(stderr)
+	if payload == "" {
+		t.Fatal("unsupported flag JSON error payload is empty")
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal([]byte(payload), &document); err != nil {
+		t.Fatalf("decode unsupported flag JSON error payload %q: %v", payload, err)
+	}
+	errorDocument, ok := document["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error field = %#v, want object", document["error"])
+	}
+	if got := errorDocument["code"]; got != "invalid_arguments" {
+		t.Fatalf("error.code = %v, want invalid_arguments", got)
+	}
+	if got := errorDocument["message"]; got != "unknown flag: --json" {
+		t.Fatalf("error.message = %v, want unsupported --json flag", got)
 	}
 }
 
@@ -112,7 +132,7 @@ func TestRootCommandJSONErrorReportsWriteFailure(t *testing.T) {
 	var stdout bytes.Buffer
 	stderr := failingWriter{err: errors.New("disk full")}
 
-	err := executeRootCommandWithWriters([]string{"--json", "missing-command"}, &stdout, stderr)
+	err := executeRootCommandWithWriters([]string{"missing-command"}, &stdout, stderr)
 	if err == nil {
 		t.Fatal("execute unknown command with failing writer error = nil, want error")
 	}

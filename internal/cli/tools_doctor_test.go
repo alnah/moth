@@ -9,7 +9,7 @@ func TestToolsDoctorJSONReportsMissingTools(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("ROD_BROWSER_BIN", "")
 
-	stdout, stderr, err := executeRootCommand("--json", "tools", "doctor", "--tools-dir", t.TempDir())
+	stdout, stderr, err := executeRootCommand("tools", "doctor", "--tools-dir", t.TempDir())
 	if err != nil {
 		t.Fatalf("execute tools doctor: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
