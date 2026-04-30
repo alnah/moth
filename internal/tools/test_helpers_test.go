@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alnah/moth/internal/tools"
 )
 
 func buildFakeToolProgram(t *testing.T) string {
@@ -23,115 +26,55 @@ func buildFakeToolProgram(t *testing.T) string {
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"time"
 )
 
 func main() {
-	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
 	args := os.Args[1:]
-
-	if len(args) > 0 {
-		switch args[0] {
-		case "echo-args":
-			fmt.Println(strings.Join(args[1:], "\n"))
-			return
-		case "fail":
-			fmt.Fprintln(os.Stderr, "fake tool failed")
-			os.Exit(7)
-		case "sleep":
-			duration := 10 * time.Second
-			if len(args) > 1 {
-				seconds, err := strconv.Atoi(args[1])
-				if err == nil {
-					duration = time.Duration(seconds) * time.Second
-				}
-			}
-			time.Sleep(duration)
-			return
-		case "--list-langs":
-			langs := os.Getenv("MOTH_FAKE_TESSERACT_LANGS")
-			if langs == "" {
-				langs = "eng,fra"
-			}
-			fmt.Printf("List of available languages in fake tessdata (%d):\n", len(strings.Split(langs, ",")))
-			for _, lang := range strings.Split(langs, ",") {
-				fmt.Println(strings.TrimSpace(lang))
-			}
-			return
-		case "--help", "-help", "-h", "-?":
-			fmt.Printf("%s fake help\n", name)
-			return
-		case "--version", "-version", "-v":
-			printVersion(name)
-			return
-		}
+	if len(args) == 0 {
+		return
 	}
 
-	printVersion(name)
-}
-
-func printVersion(name string) {
-	switch name {
-	case "yt-dlp":
-		fmt.Println("2026.04.30")
-	case "ffmpeg", "ffprobe":
-		fmt.Printf("%s version 8.0\n", name)
-	case "pdftotext":
-		fmt.Fprintln(os.Stderr, "pdftotext version 25.11.0")
-	case "ocrmypdf":
-		fmt.Println("ocrmypdf 16.99.0")
-	case "tesseract":
-		fmt.Println("tesseract 5.5.1")
-	case "chromium", "chrome", "google-chrome":
-		fmt.Printf("Chromium 142.0.0 fake %s\n", runtime.GOOS)
-	default:
-		fmt.Printf("%s version 1.0.0\n", name)
+	switch args[0] {
+	case "echo-args":
+		fmt.Println(strings.Join(args[1:], "\n"))
+	case "fail":
+		fmt.Fprintln(os.Stderr, "fake tool failed")
+		os.Exit(7)
+	case "write-output":
+		if len(args) > 1 {
+			fmt.Fprint(os.Stdout, args[1])
+		}
+		if len(args) > 2 {
+			fmt.Fprint(os.Stderr, args[2])
+		}
+	case "wait-for-cancel":
+		if len(args) > 1 {
+			_ = os.WriteFile(args[1], []byte("ready\n"), 0o600)
+		}
+		time.Sleep(time.Hour)
 	}
 }
 `
 
 	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
-		t.Fatalf("write fake tool source: %v", err)
+		t.Fatalf("write fake process source: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	//nolint:gosec // Test builds a controlled fake tool fixture.
+	//nolint:gosec // Test builds a controlled fake process fixture.
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, sourcePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("build fake tool program: %v\n%s", err, output)
+		t.Fatalf("build fake process program: %v\n%s", err, output)
 	}
 
 	return binaryPath
 }
 
-func installFakeTool(t *testing.T, programPath string, dir string, name string) string {
-	t.Helper()
-
-	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // Test fixture directory must be searchable.
-		t.Fatalf("create fake tool dir: %v", err)
-	}
-
-	contents, err := os.ReadFile(programPath) //nolint:gosec // Test reads the controlled fake tool fixture.
-	if err != nil {
-		t.Fatalf("read fake tool program: %v", err)
-	}
-
-	path := filepath.Join(dir, executableFileName(name))
-	if err := os.WriteFile(path, contents, 0o755); err != nil { //nolint:gosec // Test fixture must be executable.
-		t.Fatalf("write fake tool %s: %v", name, err)
-	}
-
-	return path
-}
-
-//nolint:unparam // Name documents the fake executable contract.
 func fakeExecutablePath(t *testing.T, dir string, name string) string {
 	t.Helper()
 
@@ -157,11 +100,11 @@ func executableFileName(name string) string {
 	return name
 }
 
-func installFakeRequiredTools(t *testing.T, programPath string, toolsDir string) {
+func installFakeRequiredTools(t *testing.T, toolsDir string) {
 	t.Helper()
 
 	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "ocrmypdf", "tesseract"} {
-		installFakeTool(t, programPath, toolsDir, name)
+		fakeExecutablePath(t, toolsDir, name)
 	}
 }
 
@@ -170,4 +113,72 @@ func isolatedPATH(t *testing.T) string {
 
 	dir := t.TempDir()
 	return dir
+}
+
+type fakeDoctorRunner struct {
+	tesseractLanguages []string
+	commands           []tools.Command
+}
+
+func newFakeDoctorRunner(languages ...string) *fakeDoctorRunner {
+	if len(languages) == 0 {
+		languages = []string{"eng", "fra"}
+	}
+
+	return &fakeDoctorRunner{tesseractLanguages: languages}
+}
+
+func (runner *fakeDoctorRunner) Run(ctx context.Context, command tools.Command) (tools.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return tools.Result{ExitCode: -1}, err
+	}
+
+	runner.commands = append(runner.commands, command)
+	if len(command.Args) > 0 && command.Args[0] == "--list-langs" {
+		return tools.Result{Stdout: []byte(runner.tesseractLanguageOutput()), ExitCode: 0}, nil
+	}
+
+	return tools.Result{Stdout: []byte(fakeVersion(command.Path)), ExitCode: 0}, nil
+}
+
+func (runner *fakeDoctorRunner) tesseractLanguageOutput() string {
+	return fmt.Sprintf(
+		"List of available languages in fake tessdata (%d):\n%s\n",
+		len(runner.tesseractLanguages),
+		strings.Join(runner.tesseractLanguages, "\n"),
+	)
+}
+
+func fakeVersion(path string) string {
+	name := strings.TrimSuffix(filepath.Base(path), ".exe")
+	switch name {
+	case "yt-dlp":
+		return "2026.04.30\n"
+	case "ffmpeg", "ffprobe":
+		return name + " version 8.0\n"
+	case "pdftotext":
+		return "pdftotext version 25.11.0\n"
+	case "ocrmypdf":
+		return "ocrmypdf 16.99.0\n"
+	case "tesseract":
+		return "tesseract 5.5.1\n"
+	case "chromium", "chrome", "google-chrome":
+		return "Chromium 142.0.0 fake " + runtime.GOOS + "\n"
+	default:
+		return name + " version 1.0.0\n"
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for file %q", path)
 }

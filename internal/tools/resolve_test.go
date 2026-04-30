@@ -3,7 +3,9 @@ package tools_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/alnah/moth/internal/tools"
@@ -112,5 +114,54 @@ func TestResolveMissingToolReturnsSemanticError(t *testing.T) {
 	}
 	if !errors.Is(err, tools.ErrToolMissing) {
 		t.Fatalf("resolve missing tool error = %v, want ErrToolMissing", err)
+	}
+}
+
+func TestResolveRejectsExistingNonExecutableFileOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows executable checks do not use Unix mode bits")
+	}
+
+	path := filepath.Join(t.TempDir(), "yt-dlp")
+	if err := os.WriteFile(path, []byte("not executable\n"), 0o600); err != nil {
+		t.Fatalf("write non-executable tool candidate: %v", err)
+	}
+
+	_, err := tools.Resolve(context.Background(), tools.ResolveOptions{
+		Name:         tools.ToolYTDLP,
+		ExplicitPath: path,
+	})
+	if err == nil {
+		t.Fatal("resolve non-executable tool error = nil, want tool_missing error")
+	}
+	if !errors.Is(err, tools.ErrToolMissing) {
+		t.Fatalf("resolve non-executable tool error = %v, want ErrToolMissing", err)
+	}
+
+	_, err = tools.Run(context.Background(), tools.Command{Path: path})
+	if err == nil {
+		t.Fatal("run non-executable tool error = nil, want tool_missing error")
+	}
+	if !errors.Is(err, tools.ErrToolMissing) {
+		t.Fatalf("run non-executable tool error = %v, want ErrToolMissing", err)
+	}
+}
+
+func TestResolveReturnsContextErrorWhenContextAlreadyCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := tools.Resolve(ctx, tools.ResolveOptions{
+		Name:     tools.ToolYTDLP,
+		ToolsDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("resolve with canceled context error = nil, want context cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resolve with canceled context error = %v, want context canceled", err)
+	}
+	if errors.Is(err, tools.ErrToolMissing) {
+		t.Fatalf("resolve with canceled context error = %v, must not report tool_missing", err)
 	}
 }

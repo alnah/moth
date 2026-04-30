@@ -9,8 +9,6 @@ import (
 )
 
 func TestDoctorInstallHintsAreSpecificToPlatformAndTool(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
-
 	cases := []struct {
 		name                 string
 		platform             tools.Platform
@@ -42,16 +40,16 @@ func TestDoctorInstallHintsAreSpecificToPlatformAndTool(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			toolsDir := t.TempDir()
-			installFakeTool(t, programPath, toolsDir, "tesseract")
+			fakeExecutablePath(t, toolsDir, "tesseract")
 
 			t.Setenv("PATH", isolatedPATH(t))
 			t.Setenv("ROD_BROWSER_BIN", "")
-			t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng")
 
 			report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 				ToolsDir:                   toolsDir,
 				RequiredTesseractLanguages: []string{"eng", "fra"},
 				Platform:                   tc.platform,
+				Runner:                     newFakeDoctorRunner("eng"),
 			})
 			if err != nil {
 				t.Fatalf("run doctor for %s: %v", tc.platform.OS, err)

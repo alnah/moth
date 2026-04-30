@@ -11,17 +11,16 @@ import (
 )
 
 func TestDoctorReportsMissingBrowserWithoutLaunchingChrome(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
-	installFakeRequiredTools(t, programPath, toolsDir)
+	installFakeRequiredTools(t, toolsDir)
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", "")
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 	})
 	if err != nil {
 		t.Fatalf("run doctor without browser: %v", err)
@@ -43,19 +42,18 @@ func TestDoctorReportsMissingBrowserWithoutLaunchingChrome(t *testing.T) {
 }
 
 func TestDoctorDiscoversBrowserFromPATHWhenRodBrowserBinIsUnset(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
-	installFakeRequiredTools(t, programPath, toolsDir)
+	installFakeRequiredTools(t, toolsDir)
 	pathBrowserDir := filepath.Join(t.TempDir(), "path-browser")
-	pathBrowserPath := installFakeTool(t, programPath, pathBrowserDir, "chromium")
+	pathBrowserPath := fakeExecutablePath(t, pathBrowserDir, "chromium")
 
 	t.Setenv("PATH", pathBrowserDir)
 	t.Setenv("ROD_BROWSER_BIN", "")
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 	})
 	if err != nil {
 		t.Fatalf("run doctor with PATH browser: %v", err)
@@ -77,18 +75,17 @@ func TestDoctorDiscoversBrowserFromPATHWhenRodBrowserBinIsUnset(t *testing.T) {
 }
 
 func TestDoctorDiscoversRodManagedBrowserCache(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
-	installFakeRequiredTools(t, programPath, toolsDir)
-	managedBrowserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "rod-cache"), "chromium")
+	installFakeRequiredTools(t, toolsDir)
+	managedBrowserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "rod-cache"), "chromium")
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", "")
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 		Browser: tools.BrowserDoctorOptions{
 			ManagedBrowserPath: managedBrowserPath,
 		},
@@ -110,19 +107,18 @@ func TestDoctorDiscoversRodManagedBrowserCache(t *testing.T) {
 }
 
 func TestDoctorDeepBrowserLaunchUsesFakeLauncher(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
-	installFakeRequiredTools(t, programPath, toolsDir)
-	browserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "browser"), "chromium")
+	installFakeRequiredTools(t, toolsDir)
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
 	launcher := &fakeBrowserLauncher{}
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", browserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 		Browser: tools.BrowserDoctorOptions{
 			DeepLaunch: true,
 			Launcher:   launcher,
@@ -145,19 +141,18 @@ func TestDoctorDeepBrowserLaunchUsesFakeLauncher(t *testing.T) {
 }
 
 func TestDoctorDeepBrowserLaunchReportsFailureWithoutRealChrome(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
-	installFakeRequiredTools(t, programPath, toolsDir)
-	browserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "browser"), "chromium")
+	installFakeRequiredTools(t, toolsDir)
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
 	launcher := &fakeBrowserLauncher{err: errors.New("headless launch failed")}
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", browserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 		Browser: tools.BrowserDoctorOptions{
 			DeepLaunch: true,
 			Launcher:   launcher,
@@ -180,19 +175,18 @@ func TestDoctorDeepBrowserLaunchReportsFailureWithoutRealChrome(t *testing.T) {
 }
 
 func TestDoctorDeepBrowserLaunchReportsTimeout(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
-	installFakeRequiredTools(t, programPath, toolsDir)
-	browserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "browser"), "chromium")
+	installFakeRequiredTools(t, toolsDir)
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
 	launcher := &fakeBrowserLauncher{err: context.DeadlineExceeded}
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", browserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 		Browser: tools.BrowserDoctorOptions{
 			DeepLaunch: true,
 			Launcher:   launcher,

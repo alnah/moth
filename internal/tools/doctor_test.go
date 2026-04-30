@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/alnah/moth/internal/content"
@@ -11,20 +12,19 @@ import (
 )
 
 func TestDoctorReportsRequiredToolsWithPathsVersionsAndWarnings(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
 	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "ocrmypdf", "tesseract"} {
-		installFakeTool(t, programPath, toolsDir, name)
+		fakeExecutablePath(t, toolsDir, name)
 	}
-	browserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "browser"), "chromium")
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", browserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 		Browser: tools.BrowserDoctorOptions{
 			DeepLaunch: false,
 		},
@@ -76,21 +76,61 @@ func TestDoctorReportsRequiredToolsWithPathsVersionsAndWarnings(t *testing.T) {
 	}
 }
 
-func TestDoctorReportsMissingToolsWithoutInstalling(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
+func TestDoctorProbesToolsThroughInjectedRunner(t *testing.T) {
 	toolsDir := t.TempDir()
-	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "tesseract"} {
-		installFakeTool(t, programPath, toolsDir, name)
+	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "ocrmypdf", "tesseract"} {
+		fakeExecutablePath(t, toolsDir, name)
 	}
-	browserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "browser"), "chromium")
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
+	runner := newFakeDoctorRunner()
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", browserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     runner,
+	})
+	if err != nil {
+		t.Fatalf("run doctor with injected runner: %v", err)
+	}
+
+	if status := findToolStatus(t, report, tools.ToolYTDLP); status.Version != "2026.04.30" {
+		t.Fatalf("yt-dlp version = %q, want fake runner version", status.Version)
+	}
+
+	for _, probe := range []struct {
+		tool tools.ToolName
+		args []string
+	}{
+		{tool: tools.ToolYTDLP, args: []string{"--version"}},
+		{tool: tools.ToolFFmpeg, args: []string{"--version"}},
+		{tool: tools.ToolFFprobe, args: []string{"--version"}},
+		{tool: tools.ToolPDFToText, args: []string{"--version"}},
+		{tool: tools.ToolOCRMyPDF, args: []string{"--version"}},
+		{tool: tools.ToolTesseract, args: []string{"--version"}},
+		{tool: tools.ToolTesseract, args: []string{"--list-langs"}},
+		{tool: tools.ToolChromium, args: []string{"--version"}},
+	} {
+		assertDoctorProbe(t, runner.commands, probe.tool, probe.args)
+	}
+}
+
+func TestDoctorReportsMissingToolsWithoutInstalling(t *testing.T) {
+	toolsDir := t.TempDir()
+	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "tesseract"} {
+		fakeExecutablePath(t, toolsDir, name)
+	}
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
+
+	t.Setenv("PATH", isolatedPATH(t))
+	t.Setenv("ROD_BROWSER_BIN", browserPath)
+
+	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
+		ToolsDir:                   toolsDir,
+		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 	})
 	if err != nil {
 		t.Fatalf("run doctor with missing ocrmypdf: %v", err)
@@ -115,20 +155,19 @@ func TestDoctorReportsMissingToolsWithoutInstalling(t *testing.T) {
 }
 
 func TestDoctorReportsMissingTesseractLanguages(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
 	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "ocrmypdf", "tesseract"} {
-		installFakeTool(t, programPath, toolsDir, name)
+		fakeExecutablePath(t, toolsDir, name)
 	}
-	browserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "browser"), "chromium")
+	browserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "browser"), "chromium")
 
 	t.Setenv("PATH", isolatedPATH(t))
 	t.Setenv("ROD_BROWSER_BIN", browserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner("eng"),
 	})
 	if err != nil {
 		t.Fatalf("run doctor with missing tesseract language: %v", err)
@@ -147,22 +186,21 @@ func TestDoctorReportsMissingTesseractLanguages(t *testing.T) {
 }
 
 func TestDoctorUsesRODBrowserBinBeforeOtherBrowserSources(t *testing.T) {
-	programPath := buildFakeToolProgram(t)
 	toolsDir := t.TempDir()
 	for _, name := range []string{"yt-dlp", "ffmpeg", "ffprobe", "pdftotext", "ocrmypdf", "tesseract"} {
-		installFakeTool(t, programPath, toolsDir, name)
+		fakeExecutablePath(t, toolsDir, name)
 	}
-	envBrowserPath := installFakeTool(t, programPath, filepath.Join(t.TempDir(), "env-browser"), "chromium")
+	envBrowserPath := fakeExecutablePath(t, filepath.Join(t.TempDir(), "env-browser"), "chromium")
 	pathBrowserDir := filepath.Join(t.TempDir(), "path-browser")
-	installFakeTool(t, programPath, pathBrowserDir, "chromium")
+	fakeExecutablePath(t, pathBrowserDir, "chromium")
 
 	t.Setenv("PATH", pathBrowserDir)
 	t.Setenv("ROD_BROWSER_BIN", envBrowserPath)
-	t.Setenv("MOTH_FAKE_TESSERACT_LANGS", "eng,fra")
 
 	report, err := tools.Doctor(context.Background(), tools.DoctorOptions{
 		ToolsDir:                   toolsDir,
 		RequiredTesseractLanguages: []string{"eng", "fra"},
+		Runner:                     newFakeDoctorRunner(),
 		Browser: tools.BrowserDoctorOptions{
 			DeepLaunch: false,
 		},
@@ -180,6 +218,31 @@ func TestDoctorUsesRODBrowserBinBeforeOtherBrowserSources(t *testing.T) {
 	}
 }
 
+func assertDoctorProbe(t *testing.T, commands []tools.Command, tool tools.ToolName, args []string) {
+	t.Helper()
+
+	for _, command := range commands {
+		if command.Tool != tool || !slices.Equal(command.Args, args) {
+			continue
+		}
+		if command.Path == "" {
+			t.Fatalf("%s %v probe path is empty", tool, args)
+		}
+		if command.StdoutLimitBytes <= 0 || command.StderrLimitBytes <= 0 {
+			t.Fatalf(
+				"%s %v probe limits = stdout:%d stderr:%d, want positive limits",
+				tool,
+				args,
+				command.StdoutLimitBytes,
+				command.StderrLimitBytes,
+			)
+		}
+		return
+	}
+
+	t.Fatalf("probe %s %v missing from injected runner commands: %#v", tool, args, commands)
+}
+
 func findToolStatus(t *testing.T, report tools.DoctorReport, name tools.ToolName) tools.ToolStatus {
 	t.Helper()
 
@@ -194,11 +257,5 @@ func findToolStatus(t *testing.T, report tools.DoctorReport, name tools.ToolName
 }
 
 func hasWarning(warnings []content.Warning, want content.Warning) bool {
-	for _, warning := range warnings {
-		if warning == want {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(warnings, want)
 }
