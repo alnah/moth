@@ -28,14 +28,14 @@ type Options struct {
 	MaxRetryBodyBytes int64
 }
 
-// Client wraps net/http.Client with API retry behavior.
+// Client wraps net/http.Client with retry behavior.
 type Client struct {
 	httpClient *http.Client
 	policy     retryPolicy
 	sleeper    Sleeper
 }
 
-// DefaultOptions returns the standard API retry policy.
+// DefaultOptions returns the standard retry policy for outbound HTTP calls.
 func DefaultOptions() Options {
 	return Options{
 		HTTPClient:        http.DefaultClient,
@@ -69,6 +69,9 @@ func New(options Options) *Client {
 }
 
 // Do sends an HTTP request and retries transient failures.
+//
+// When Do returns a nil error, the caller owns and must close the response body.
+// Intermediate retry response bodies are bounded-drained and closed before retrying.
 func (client *Client) Do(req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, errNilRequest
@@ -78,17 +81,18 @@ func (client *Client) Do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 
 	for attempt := 0; attempt < attempts; attempt++ {
+		attemptNumber := attempt + 1
 		attemptReq, err := requestForAttempt(req, attempt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("prepare attempt %d/%d: %w", attemptNumber, attempts, err)
 		}
 
-		//nolint:gosec // API clients build request URLs from provider configuration and command inputs.
+		//nolint:gosec // Requests are built by callers; this package only retries supplied requests.
 		resp, err := client.httpClient.Do(attemptReq)
 		if err != nil {
 			lastErr = err
 			if !client.shouldRetryError(req, err, attempt) {
-				return nil, fmt.Errorf("http request failed: %w", err)
+				return nil, fmt.Errorf("http request failed on attempt %d/%d: %w", attemptNumber, attempts, err)
 			}
 		} else {
 			if !client.shouldRetryResponse(req, resp, attempt) {
@@ -99,7 +103,7 @@ func (client *Client) Do(req *http.Request) (*http.Response, error) {
 
 		delay := client.policy.delay(attempt, retryAfterDelay(resp))
 		if err := client.sleeper.Sleep(req.Context(), delay); err != nil {
-			return nil, fmt.Errorf("wait before retry: %w", err)
+			return nil, fmt.Errorf("wait before retry attempt %d/%d: %w", attemptNumber+1, attempts, err)
 		}
 	}
 
