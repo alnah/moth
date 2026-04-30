@@ -65,7 +65,7 @@
 - Rename rule: never use raw search/replace for symbol rename when `gopls rename` applies.
 - Imports: use `gopls imports <file>` or `goimports -w .`.
 - Format: use `gopls format <file>` or `gofmt -w .`.
-- Diagnostics: use `gopls check <file>`, `go vet ./...`, `golangci-lint run`.
+- Diagnostics: use `gopls check <file>`, `go vet ./...`, `go tool golangci-lint run`.
 
 ## Coverage and Codecov
 
