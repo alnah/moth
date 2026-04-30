@@ -9,14 +9,14 @@ import (
 	"github.com/alnah/moth/internal/content"
 )
 
-func checkBrowser(ctx context.Context, options BrowserDoctorOptions, platform Platform) ToolStatus {
+func checkBrowser(ctx context.Context, options BrowserDoctorOptions, platform Platform, runner Runner) ToolStatus {
 	resolved, err := resolveBrowser(ctx, options)
 	if err != nil {
 		return missingStatus(ToolChromium, installHints(ToolChromium, platform, nil))
 	}
 
 	status := okStatus(resolved)
-	status.Version = detectVersion(ctx, resolved.Path, "--version")
+	status.Version = detectVersion(ctx, runner, resolved, []string{"--version"})
 
 	if options.DeepLaunch {
 		status = deepLaunchBrowser(ctx, status, options.Launcher)

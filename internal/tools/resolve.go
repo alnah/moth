@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 // ResolveOptions configures tool path lookup.
@@ -18,7 +19,9 @@ type ResolveOptions struct {
 
 // Resolve finds a tool using explicit path, environment path, tools dir, then PATH.
 func Resolve(ctx context.Context, options ResolveOptions) (ResolvedTool, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return ResolvedTool{}, fmt.Errorf("resolve %s: %w", options.Name, err)
+	}
 
 	if options.ExplicitPath != "" {
 		if isExistingExecutable(options.ExplicitPath) {
@@ -43,6 +46,9 @@ func Resolve(ctx context.Context, options ResolveOptions) (ResolvedTool, error) 
 
 	if options.ToolsDir != "" {
 		for _, fileName := range toolFileNames(options.Name) {
+			if err := ctx.Err(); err != nil {
+				return ResolvedTool{}, fmt.Errorf("resolve %s: %w", options.Name, err)
+			}
 			toolPath := filepath.Join(options.ToolsDir, fileName)
 			if isExistingExecutable(toolPath) {
 				return resolvedTool(options.Name, toolPath, SourceToolsDir), nil
@@ -63,8 +69,26 @@ func resolvedTool(name ToolName, path string, source ToolSource) ResolvedTool {
 }
 
 func isExistingExecutable(path string) bool {
+	return validateExecutablePath(path) == nil
+}
+
+func validateExecutablePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("empty executable path: %w", ErrToolMissing)
+	}
+
 	info, err := os.Stat(path) //nolint:gosec // Path is the user-selected executable candidate being checked.
-	return err == nil && !info.IsDir()
+	if err != nil {
+		return fmt.Errorf("stat executable path %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("executable path %q is a directory: %w", path, ErrToolMissing)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("executable path %q is not executable: %w", path, ErrToolMissing)
+	}
+
+	return nil
 }
 
 func toolFileNames(name ToolName) []string {

@@ -13,6 +13,7 @@ import (
 const (
 	typeToolDoctor              = "tool_doctor"
 	defaultBrowserLaunchTimeout = 5 * time.Second
+	toolProbeOutputLimitBytes   = 64 * 1024
 )
 
 // BrowserLauncher verifies a resolved browser executable without exposing Rod internals.
@@ -33,6 +34,7 @@ type DoctorOptions struct {
 	RequiredTesseractLanguages []string
 	Browser                    BrowserDoctorOptions
 	Platform                   Platform
+	Runner                     Runner
 }
 
 // Doctor checks required external tools and returns a JSON-ready report.
@@ -40,6 +42,10 @@ func Doctor(ctx context.Context, options DoctorOptions) (DoctorReport, error) {
 	platform := options.Platform
 	if platform.OS == "" {
 		platform.OS = runtime.GOOS
+	}
+	runner := options.Runner
+	if runner == nil {
+		runner = LocalRunner{}
 	}
 	report := DoctorReport{
 		Type:     typeToolDoctor,
@@ -50,37 +56,37 @@ func Doctor(ctx context.Context, options DoctorOptions) (DoctorReport, error) {
 		if err := ctx.Err(); err != nil {
 			return report, fmt.Errorf("run tools doctor: %w", err)
 		}
-		status := checkTool(ctx, spec, options.ToolsDir, platform)
+		status := checkTool(ctx, spec, options.ToolsDir, platform, runner)
 		if spec.name == ToolTesseract && status.Status != StatusMissing {
-			status = checkTesseractLanguages(ctx, status, options.RequiredTesseractLanguages, platform)
+			status = checkTesseractLanguages(ctx, runner, status, options.RequiredTesseractLanguages, platform)
 		}
 		report.Tools = append(report.Tools, status)
 	}
 
-	browserStatus := checkBrowser(ctx, options.Browser, platform)
+	browserStatus := checkBrowser(ctx, options.Browser, platform, runner)
 	report.Tools = append(report.Tools, browserStatus)
 
 	return report, nil
 }
 
 type toolSpec struct {
-	name       ToolName
-	envVar     string
-	versionArg string
+	name        ToolName
+	envVar      string
+	versionArgs []string
 }
 
 func requiredToolSpecs() []toolSpec {
 	return []toolSpec{
-		{name: ToolYTDLP, envVar: "YT_DLP_PATH", versionArg: "--version"},
-		{name: ToolFFmpeg, envVar: "FFMPEG_PATH", versionArg: "--version"},
-		{name: ToolFFprobe, envVar: "FFPROBE_PATH", versionArg: "--version"},
-		{name: ToolPDFToText, envVar: "PDFTOTEXT_PATH", versionArg: "--version"},
-		{name: ToolOCRMyPDF, envVar: "OCRMYPDF_PATH", versionArg: "--version"},
-		{name: ToolTesseract, envVar: "TESSERACT_PATH", versionArg: "--version"},
+		{name: ToolYTDLP, envVar: "YT_DLP_PATH", versionArgs: []string{"--version"}},
+		{name: ToolFFmpeg, envVar: "FFMPEG_PATH", versionArgs: []string{"--version"}},
+		{name: ToolFFprobe, envVar: "FFPROBE_PATH", versionArgs: []string{"--version"}},
+		{name: ToolPDFToText, envVar: "PDFTOTEXT_PATH", versionArgs: []string{"--version"}},
+		{name: ToolOCRMyPDF, envVar: "OCRMYPDF_PATH", versionArgs: []string{"--version"}},
+		{name: ToolTesseract, envVar: "TESSERACT_PATH", versionArgs: []string{"--version"}},
 	}
 }
 
-func checkTool(ctx context.Context, spec toolSpec, toolsDir string, platform Platform) ToolStatus {
+func checkTool(ctx context.Context, spec toolSpec, toolsDir string, platform Platform, runner Runner) ToolStatus {
 	resolved, err := Resolve(ctx, ResolveOptions{
 		Name:     spec.name,
 		EnvVar:   spec.envVar,
@@ -91,18 +97,25 @@ func checkTool(ctx context.Context, spec toolSpec, toolsDir string, platform Pla
 	}
 
 	status := okStatus(resolved)
-	status.Version = detectVersion(ctx, resolved.Path, spec.versionArg)
+	status.Version = detectVersion(ctx, runner, resolved, spec.versionArgs)
 	return status
 }
 
-func detectVersion(ctx context.Context, path string, versionArg string) string {
-	result, _ := Run(ctx, Command{Path: path, Args: []string{versionArg}})
+func detectVersion(ctx context.Context, runner Runner, resolved ResolvedTool, args []string) string {
+	result, _ := runner.Run(ctx, probeCommand(resolved, args))
 	combined := strings.TrimSpace(strings.Join([]string{string(result.Stdout), string(result.Stderr)}, "\n"))
 	return strings.TrimSpace(strings.Split(combined, "\n")[0])
 }
 
-func checkTesseractLanguages(ctx context.Context, status ToolStatus, required []string, platform Platform) ToolStatus {
-	result, _ := Run(ctx, Command{Path: status.Path, Args: []string{"--list-langs"}})
+func checkTesseractLanguages(
+	ctx context.Context,
+	runner Runner,
+	status ToolStatus,
+	required []string,
+	platform Platform,
+) ToolStatus {
+	resolved := ResolvedTool{Name: status.Name, Path: status.Path}
+	result, _ := runner.Run(ctx, probeCommand(resolved, []string{"--list-langs"}))
 
 	available := parseTesseractLanguages(string(result.Stdout) + "\n" + string(result.Stderr))
 	missing := missingLanguages(available, required)
@@ -117,9 +130,19 @@ func checkTesseractLanguages(ctx context.Context, status ToolStatus, required []
 	return status
 }
 
+func probeCommand(resolved ResolvedTool, args []string) Command {
+	return Command{
+		Tool:             resolved.Name,
+		Path:             resolved.Path,
+		Args:             args,
+		StdoutLimitBytes: toolProbeOutputLimitBytes,
+		StderrLimitBytes: toolProbeOutputLimitBytes,
+	}
+}
+
 func parseTesseractLanguages(output string) map[string]struct{} {
 	languages := make(map[string]struct{})
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(strings.ToLower(line), "list of available languages") {
 			continue
