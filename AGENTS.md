@@ -48,10 +48,10 @@
 ## Test-Driven Development
 
 - Specs: always toward GRASP architecture; input = user + codebase; output = specs + todos; 1 session = 1 agent Architect; audit package boundaries, contracts, existing tests, release-note deltas first; use `rg`, `go doc`, `gopls symbols`, `gopls definition`, `gopls references`; never do Red.
-- Red: always write failing tests; input = specs + todos; output = red tests; 1 session = 1 agent QA; follow `testing`, `httptest`, `fstest`, `slogtest`, fuzz, coverage, race guidance when relevant; use `go test` modes to prove failure first; never touch Specs, never do Green.
+- Red: always write failing tests; input = specs + todos; output = red tests; 1 session = 1 agent QA; follow `testing`, `httptest`, `fstest`, `slogtest`, fuzz, coverage, race guidance when relevant; use `go test` modes to prove failure first; never touch Specs, never do Green. Tests must be refactor-resistant: assert public behavior, contracts, boundaries, happy paths, sad paths, and edge cases; avoid coupling to incidental implementation details.
 - Green: always make it work/correct to satisfy specs; input = red tests + specs; output = code; 1 session = 1 agent Dev; prefer minimal code, stdlib-first, consumer-side interfaces, explicit errors and context propagation; use `go doc`, `gopls definition`, `gopls references`, `gopls implementation`; never touch Red, never do Refactor.
 - Refactor-code: always toward SOLID design; input = code; output = clean code; 1 session = 1 agent Expert Dev; use `gopls symbols`, `gopls definition`, `gopls references`, `gopls implementation`, `gopls prepare_rename`, `gopls rename`; never rename symbols by raw search/replace when semantic rename applies; never do Refactor-test.
-- Refactor-tests: always toward SOLID design; input = tests; output = clean tests; 1 session = 1 agent Expert QA; use `gopls symbols`, `gopls definition`, `gopls references`, `gopls prepare_rename`, `gopls rename`; keep fixtures small, failures explicit, helpers intention-revealing; never touch Refactor-code, never do Expand.
+- Refactor-tests: always toward SOLID design; input = tests; output = clean tests; 1 session = 1 agent Expert QA; use `gopls symbols`, `gopls definition`, `gopls references`, `gopls prepare_rename`, `gopls rename`; keep fixtures small, failures explicit, helpers intention-revealing; keep tests refactor-resistant and behavior-focused; never touch Refactor-code, never do Expand.
 - Expand: when feature done, always tests for safety, edge cases, regressions; input = user + codebase; output = new TDD cycle; 1 session = 1 agent Architect; use bugs, missed branches, fuzz seeds, race findings, coverage gaps as inputs; the loop goes on.
 
 ## Go refactor tools
@@ -69,7 +69,10 @@
 
 ## Coverage and Codecov
 
+- Coverage threshold: require >90% meaningful coverage for changed packages and overall project unless explicitly waived with rationale.
 - Coverage focus: prioritize meaningful coverage in `internal/...`; keep `cmd/...` thin and test wiring, flags, config loading, startup, shutdown, exit paths, and error propagation.
+- Test quality: coverage must include happy paths, sad paths, edge cases, boundaries, error wrapping/propagation, parsing/serialization contracts, resource cleanup, and concurrency/race behavior when relevant.
+- Refactor resistance: tests should assert observable behavior and stable contracts, not private implementation details, call order, or incidental structure.
 - Coverage: use `go test -cover ./...` for quick signal.
 - Coverage profile: use `go test -coverprofile=coverage.out ./...`.
 - Coverage report: use `go tool cover -func=coverage.out` and `go tool cover -html=coverage.out`.
