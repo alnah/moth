@@ -53,3 +53,6 @@ coverage.out
 .gemini/
 .opencode/
 .pi/
+
+# Private docs
+/docs/_*.md
