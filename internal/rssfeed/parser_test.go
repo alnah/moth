@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestParseRSSMapsEnclosuresAndITunesDuration(t *testing.T) {
@@ -128,6 +130,92 @@ func TestParseJSONFeedMapsAttachments(t *testing.T) {
 	assertFeed(t, feed, want)
 }
 
+func TestParseRSSMapsPlainSecondsAndInvalidLengthAsZero(t *testing.T) {
+	const feedXML = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>RSS Edge Cases</title>
+    <item>
+      <title>Seconds only</title>
+      <guid>seconds-only</guid>
+      <itunes:duration>125</itunes:duration>
+      <enclosure url="https://cdn.example/seconds.mp3" type="audio/mpeg" length="unknown" />
+    </item>
+  </channel>
+</rss>`
+
+	feed, err := NewParser().Parse(context.Background(), strings.NewReader(feedXML), ParseOptions{})
+	if err != nil {
+		t.Fatalf("Parse(RSS edge-case feed) error = %v, want nil", err)
+	}
+
+	want := Feed{
+		Title: "RSS Edge Cases",
+		Items: []Item{
+			{
+				Title:    "Seconds only",
+				GUID:     "seconds-only",
+				Duration: 125 * time.Second,
+				Enclosures: []Enclosure{
+					{URL: "https://cdn.example/seconds.mp3", Type: "audio/mpeg"},
+				},
+			},
+		},
+	}
+	assertFeed(t, feed, want)
+}
+
+func TestParseHonorsCanceledContextBeforeRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewParser().Parse(ctx, strings.NewReader(`<rss></rss>`), ParseOptions{})
+	if err == nil {
+		t.Fatal("Parse(canceled context) error = nil, want context canceled")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Parse(canceled context) error = %v, want context.Canceled", err)
+	}
+}
+
+func TestParseRejectsFeedOverMaxBytes(t *testing.T) {
+	reader := strings.NewReader(`{"title":"too large"}`)
+	_, err := NewParser().Parse(context.Background(), reader, ParseOptions{MaxBytes: 4})
+	if err == nil {
+		t.Fatal("Parse(feed over max bytes) error = nil, want size error")
+	}
+}
+
+func TestParseMalformedJSONFeedReturnsSemanticError(t *testing.T) {
+	_, err := NewParser().Parse(context.Background(), strings.NewReader(`{"items":`), ParseOptions{})
+	if err == nil {
+		t.Fatal("Parse(malformed JSON feed) error = nil, want malformed feed error")
+	}
+	if !errors.Is(err, ErrMalformedFeed) {
+		t.Fatalf("Parse(malformed JSON feed) error = %v, want ErrMalformedFeed", err)
+	}
+}
+
+func TestParseJSONFeedWithoutAttachmentsMapsEmptyEnclosures(t *testing.T) {
+	const feedJSON = `{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "JSON Notes",
+  "feed_url": "https://example.test/feed.json",
+  "items": [{"id":"note-1","content_text":"short note"}]
+}`
+
+	feed, err := NewParser().Parse(context.Background(), strings.NewReader(feedJSON), ParseOptions{})
+	if err != nil {
+		t.Fatalf("Parse(JSON feed without attachments) error = %v, want nil", err)
+	}
+	if feed.URL != "https://example.test/feed.json" {
+		t.Fatalf("feed URL = %q, want JSON feed_url", feed.URL)
+	}
+	if len(feed.Items) != 1 || len(feed.Items[0].Enclosures) != 0 {
+		t.Fatalf("feed items = %#v, want one item without enclosures", feed.Items)
+	}
+}
+
 func TestParseMalformedFeedReturnsSemanticError(t *testing.T) {
 	_, err := NewParser().Parse(context.Background(), strings.NewReader(`<rss><channel><item>`), ParseOptions{})
 	if err == nil {
@@ -141,41 +229,7 @@ func TestParseMalformedFeedReturnsSemanticError(t *testing.T) {
 func assertFeed(t *testing.T, got Feed, want Feed) {
 	t.Helper()
 
-	if got.Title != want.Title {
-		t.Fatalf("feed title = %q, want %q", got.Title, want.Title)
-	}
-	if got.URL != want.URL {
-		t.Fatalf("feed URL = %q, want %q", got.URL, want.URL)
-	}
-	if len(got.Items) != len(want.Items) {
-		t.Fatalf("feed items len = %d, want %d", len(got.Items), len(want.Items))
-	}
-	for index := range want.Items {
-		assertFeedItem(t, got.Items[index], want.Items[index])
-	}
-}
-
-func assertFeedItem(t *testing.T, got Item, want Item) {
-	t.Helper()
-
-	if got.Title != want.Title {
-		t.Fatalf("item title = %q, want %q", got.Title, want.Title)
-	}
-	if got.Link != want.Link {
-		t.Fatalf("item link = %q, want %q", got.Link, want.Link)
-	}
-	if got.GUID != want.GUID {
-		t.Fatalf("item GUID = %q, want %q", got.GUID, want.GUID)
-	}
-	if got.Duration != want.Duration {
-		t.Fatalf("item duration = %s, want %s", got.Duration, want.Duration)
-	}
-	if len(got.Enclosures) != len(want.Enclosures) {
-		t.Fatalf("item enclosures len = %d, want %d", len(got.Enclosures), len(want.Enclosures))
-	}
-	for index := range want.Enclosures {
-		if got.Enclosures[index] != want.Enclosures[index] {
-			t.Fatalf("item enclosure[%d] = %#v, want %#v", index, got.Enclosures[index], want.Enclosures[index])
-		}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("feed mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -160,6 +160,112 @@ func TestDownloadEnforcesRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestDownloadUsesSafeDefaultsWhenOptionalLimitsAreUnset(t *testing.T) {
+	const body = "plain body"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeHTTPBody(t, w, body)
+	}))
+	defer server.Close()
+
+	got, err := New(Options{}).Download(context.Background(), Request{URL: server.URL})
+	if err != nil {
+		t.Fatalf("Download(default options) error = %v, want nil", err)
+	}
+	if string(got.Bytes) != body {
+		t.Fatalf("Download(default options) body = %q, want %q", got.Bytes, body)
+	}
+	if got.ContentType != "text/plain" {
+		t.Fatalf("Download(default options) content type = %q, want text/plain", got.ContentType)
+	}
+}
+
+func TestDownloadAcceptsBodyAtExactByteLimit(t *testing.T) {
+	const body = "1234"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		writeHTTPBody(t, w, body)
+	}))
+	defer server.Close()
+
+	got, err := New(Options{HTTPClient: server.Client()}).Download(context.Background(), Request{
+		URL:      server.URL,
+		MaxBytes: int64(len(body)),
+	})
+	if err != nil {
+		t.Fatalf("Download(exact byte limit) error = %v, want nil", err)
+	}
+	if string(got.Bytes) != body {
+		t.Fatalf("Download(exact byte limit) body = %q, want %q", got.Bytes, body)
+	}
+}
+
+func TestDownloadNormalizesMalformedContentTypeHeader(t *testing.T) {
+	const body = "plain body"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", " Text/Plain ; bad")
+		writeHTTPBody(t, w, body)
+	}))
+	defer server.Close()
+
+	got, err := New(Options{HTTPClient: server.Client()}).Download(context.Background(), Request{
+		URL:                 server.URL,
+		AllowedContentTypes: []string{"text/plain ; bad"},
+	})
+	if err != nil {
+		t.Fatalf("Download(malformed content type) error = %v, want nil", err)
+	}
+	if got.ContentType != "text/plain ; bad" {
+		t.Fatalf("Download(malformed content type) content type = %q, want normalized fallback", got.ContentType)
+	}
+}
+
+func TestDownloadReturnsBodyReadError(t *testing.T) {
+	downloader := New(Options{HTTPClient: &http.Client{Transport: staticDownloadTransport{}}})
+
+	_, err := downloader.Download(context.Background(), Request{URL: "https://example.test/file"})
+	if err == nil {
+		t.Fatal("Download(body read failure) error = nil, want read error")
+	}
+	if !strings.Contains(err.Error(), "read failed") {
+		t.Fatalf("Download(body read failure) error = %v, want read failure context", err)
+	}
+}
+
+func TestDownloadHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := New(Options{}).Download(ctx, Request{URL: "http://127.0.0.1/never-called"})
+	if err == nil {
+		t.Fatal("Download(canceled context) error = nil, want context canceled")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Download(canceled context) error = %v, want context.Canceled", err)
+	}
+}
+
+type staticDownloadTransport struct{}
+
+func (staticDownloadTransport) RoundTrip(_ *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/plain"}},
+		Body:       errReadCloser{},
+	}, nil
+}
+
+type errReadCloser struct{}
+
+func (errReadCloser) Read(_ []byte) (int, error) {
+	return 0, errors.New("read failed")
+}
+
+func (errReadCloser) Close() error {
+	return nil
+}
+
+var _ io.ReadCloser = errReadCloser{}
+
 func writeHTTPBody(t *testing.T, w http.ResponseWriter, body string) {
 	t.Helper()
 
