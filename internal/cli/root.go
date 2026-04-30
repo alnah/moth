@@ -7,10 +7,12 @@ import (
 	"io"
 	"time"
 
-	"github.com/alnah/moth/internal/limits"
 	"github.com/spf13/cobra"
+
+	"github.com/alnah/moth/internal/limits"
 )
 
+// ErrUnknownCommand reports a command name that is not registered.
 var ErrUnknownCommand = errors.New("unknown command")
 
 type rootOptions struct {
@@ -38,6 +40,7 @@ type errorDocumentBody struct {
 	Message string `json:"message"`
 }
 
+// NewRootCommand builds the testable root CLI without exiting the process.
 func NewRootCommand() *cobra.Command {
 	options := newRootOptions()
 

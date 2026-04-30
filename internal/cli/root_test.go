@@ -62,7 +62,8 @@ func TestRootCommandJSONErrorShape(t *testing.T) {
 	if got := errorDocument["code"]; got != "unknown_command" {
 		t.Fatalf("error.code = %v, want unknown_command", got)
 	}
-	if message, ok := errorDocument["message"].(string); !ok || message == "" {
+	message, isString := errorDocument["message"].(string)
+	if !isString || message == "" {
 		t.Fatalf("error.message = %#v, want non-empty string", errorDocument["message"])
 	}
 	warnings, ok := document["warnings"].([]any)

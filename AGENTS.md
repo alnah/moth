@@ -85,16 +85,16 @@
 
 - Build: `go build ./...` always pass.
 - Testing: all tests always pass, include race detector when applicable.
-- Lint: always lint with `go vet ./...` and `golangci-lint run`; then fix.
-- Format: always format with `gofmt`; then fix imports with `goimports`.
+- Lint: always lint with `go vet ./...` and `go tool golangci-lint run`; then fix.
+- Format: always format with `gofmt`; then fix imports with `goimports -local github.com/alnah/moth`.
 - Scripts:
   - `gofmt -w .`
-  - `goimports -w .`
+  - `goimports -w -local github.com/alnah/moth .`
   - `go test ./...`
   - `go test -race ./...`
   - `go test -cover ./...`
   - `go test -coverprofile=coverage.out ./...`
   - `go tool cover -func=coverage.out`
   - `go vet ./...`
-  - `golangci-lint run`
+  - `go tool golangci-lint run`
   - `go build ./...`

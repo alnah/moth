@@ -1,9 +1,12 @@
 package content
 
+// TypeContentPack identifies normalized Moth content JSON documents.
 const TypeContentPack = "content_pack"
 
+// Kind identifies the source media or document category for an item.
 type Kind string
 
+// Supported content item kinds.
 const (
 	KindPage         Kind = "page"
 	KindPDF          Kind = "pdf"
@@ -17,8 +20,10 @@ const (
 	KindFile         Kind = "file"
 )
 
+// Warning is a machine-readable Moth technical fact code.
 type Warning string
 
+// Supported warning codes emitted by Moth.
 const (
 	WarningTimeout             Warning = "timeout"
 	WarningLoginRequired       Warning = "login_required"
@@ -32,12 +37,14 @@ const (
 	WarningOCRFailed           Warning = "ocr_failed"
 )
 
+// Pack is the normalized JSON payload returned by Moth commands.
 type Pack struct {
 	Type     string    `json:"type"`
 	Items    []Item    `json:"items"`
 	Warnings []Warning `json:"warnings"`
 }
 
+// Item is one normalized content object in a Pack.
 type Item struct {
 	Kind       Kind           `json:"kind"`
 	URL        string         `json:"url,omitempty"`

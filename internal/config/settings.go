@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// Settings contains optional credentials and paths loaded from the environment.
 type Settings struct {
 	BraveAPIKey           string
 	YouTubeAPIKey         string
@@ -18,6 +19,7 @@ type Settings struct {
 	RodBrowserBin         string
 }
 
+// LoadFromEnv reads settings from environment variables and logs only presence flags.
 func LoadFromEnv(logger *slog.Logger) (Settings, error) {
 	settings := Settings{
 		BraveAPIKey:           os.Getenv("BRAVE_API_KEY"),

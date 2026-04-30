@@ -2,6 +2,7 @@ package limits
 
 import "time"
 
+// Default root command limits.
 const (
 	DefaultTimeout    = 30 * time.Second
 	DefaultMaxResults = 10
@@ -11,6 +12,7 @@ const (
 	DefaultRetryMax   = 5 * time.Second
 )
 
+// Options contains conservative global command limits.
 type Options struct {
 	Timeout    time.Duration
 	MaxResults int
@@ -20,6 +22,7 @@ type Options struct {
 	RetryMax   time.Duration
 }
 
+// DefaultOptions returns conservative global limits for CLI commands.
 func DefaultOptions() Options {
 	return Options{
 		Timeout:    DefaultTimeout,
