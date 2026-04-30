@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,18 +14,17 @@ import (
 // ErrUnknownCommand reports a command name that is not registered.
 var ErrUnknownCommand = errors.New("unknown command")
 
-type rootOptions struct {
+type rootFlags struct {
+	Output     outputFlags
+	Limits     limits.Options
+	ConfigPath string
+	Verbose    bool
+}
+
+type outputFlags struct {
 	JSON       bool
 	Pretty     bool
-	Timeout    time.Duration
-	MaxResults int
-	MaxBytes   int64
-	Output     string
-	Config     string
-	Verbose    bool
-	Retries    int
-	RetryBase  time.Duration
-	RetryMax   time.Duration
+	OutputPath string
 }
 
 type errorDocument struct {
@@ -42,7 +40,7 @@ type errorDocumentBody struct {
 
 // NewRootCommand builds the testable root CLI without exiting the process.
 func NewRootCommand() *cobra.Command {
-	options := newRootOptions()
+	options := newRootFlags()
 
 	cmd := &cobra.Command{
 		Use:           "moth",
@@ -51,7 +49,7 @@ func NewRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return writeUnknownCommandError(cmd, options, args[0])
+				return writeUnknownCommandError(cmd, options.Output, args[0])
 			}
 			if err := cmd.Help(); err != nil {
 				return fmt.Errorf("show root help: %w", err)
@@ -61,36 +59,30 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	flags := cmd.PersistentFlags()
-	flags.BoolVar(&options.JSON, "json", false, "write structured JSON output")
-	flags.BoolVar(&options.Pretty, "pretty", false, "pretty-print JSON output")
-	flags.DurationVar(&options.Timeout, "timeout", options.Timeout, "command timeout")
-	flags.IntVar(&options.MaxResults, "max-results", options.MaxResults, "maximum result count")
-	flags.Int64Var(&options.MaxBytes, "max-bytes", options.MaxBytes, "maximum downloaded bytes")
-	flags.StringVar(&options.Output, "output", "", "output path")
-	flags.StringVar(&options.Config, "config", "", "config path")
+	flags.BoolVar(&options.Output.JSON, "json", false, "write structured JSON output")
+	flags.BoolVar(&options.Output.Pretty, "pretty", false, "pretty-print JSON output")
+	flags.DurationVar(&options.Limits.Timeout, "timeout", options.Limits.Timeout, "command timeout")
+	flags.IntVar(&options.Limits.MaxResults, "max-results", options.Limits.MaxResults, "maximum result count")
+	flags.Int64Var(&options.Limits.MaxBytes, "max-bytes", options.Limits.MaxBytes, "maximum downloaded bytes")
+	flags.StringVar(&options.Output.OutputPath, "output", "", "output path")
+	flags.StringVar(&options.ConfigPath, "config", "", "config path")
 	flags.BoolVar(&options.Verbose, "verbose", false, "enable verbose logs")
-	flags.IntVar(&options.Retries, "retries", options.Retries, "retry count")
-	flags.DurationVar(&options.RetryBase, "retry-base", options.RetryBase, "base retry delay")
-	flags.DurationVar(&options.RetryMax, "retry-max", options.RetryMax, "maximum retry delay")
+	flags.IntVar(&options.Limits.Retries, "retries", options.Limits.Retries, "retry count")
+	flags.DurationVar(&options.Limits.RetryBase, "retry-base", options.Limits.RetryBase, "base retry delay")
+	flags.DurationVar(&options.Limits.RetryMax, "retry-max", options.Limits.RetryMax, "maximum retry delay")
 
 	return cmd
 }
 
-func newRootOptions() *rootOptions {
-	defaults := limits.DefaultOptions()
-	return &rootOptions{
-		Timeout:    defaults.Timeout,
-		MaxResults: defaults.MaxResults,
-		MaxBytes:   defaults.MaxBytes,
-		Retries:    defaults.Retries,
-		RetryBase:  defaults.RetryBase,
-		RetryMax:   defaults.RetryMax,
+func newRootFlags() *rootFlags {
+	return &rootFlags{
+		Limits: limits.DefaultOptions(),
 	}
 }
 
-func writeUnknownCommandError(cmd *cobra.Command, options *rootOptions, commandName string) error {
+func writeUnknownCommandError(cmd *cobra.Command, output outputFlags, commandName string) error {
 	message := fmt.Sprintf("unknown command: %s", commandName)
-	if options.JSON {
+	if output.JSON {
 		document := errorDocument{
 			Type: "error",
 			Error: errorDocumentBody{
@@ -99,7 +91,7 @@ func writeUnknownCommandError(cmd *cobra.Command, options *rootOptions, commandN
 			},
 			Warnings: []string{},
 		}
-		if err := writeJSON(cmd.ErrOrStderr(), options.Pretty, document); err != nil {
+		if err := writeJSON(cmd.ErrOrStderr(), output.Pretty, document); err != nil {
 			return fmt.Errorf("write unknown command error: %w", err)
 		}
 	} else {
