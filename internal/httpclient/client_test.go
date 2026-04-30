@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -94,37 +95,57 @@ func TestDoReturnsErrorForNilRequest(t *testing.T) {
 	}
 }
 
-func TestDoRetriesRetryableStatusesThenReturnsSuccessfulResponse(t *testing.T) {
-	for _, status := range []int{
-		http.StatusRequestTimeout,
-		http.StatusConflict,
-		http.StatusTooEarly,
-		http.StatusTooManyRequests,
-		http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout,
-	} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
+func TestDoRetriesOnlyRetryableStatuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		retry  bool
+	}{
+		{name: "408 request timeout", status: http.StatusRequestTimeout, retry: true},
+		{name: "409 conflict", status: http.StatusConflict, retry: true},
+		{name: "425 too early", status: http.StatusTooEarly, retry: true},
+		{name: "429 too many requests", status: http.StatusTooManyRequests, retry: true},
+		{name: "500 internal server error", status: http.StatusInternalServerError, retry: true},
+		{name: "502 bad gateway", status: http.StatusBadGateway, retry: true},
+		{name: "503 service unavailable", status: http.StatusServiceUnavailable, retry: true},
+		{name: "504 gateway timeout", status: http.StatusGatewayTimeout, retry: true},
+		{name: "200 ok", status: http.StatusOK},
+		{name: "202 accepted", status: http.StatusAccepted},
+		{name: "300 multiple choices", status: http.StatusMultipleChoices},
+		{name: "400 bad request", status: http.StatusBadRequest},
+		{name: "401 unauthorized", status: http.StatusUnauthorized},
+		{name: "403 forbidden", status: http.StatusForbidden},
+		{name: "404 not found", status: http.StatusNotFound},
+		{name: "422 unprocessable entity", status: http.StatusUnprocessableEntity},
+		{name: "501 not implemented", status: http.StatusNotImplemented},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			sleeper := newFakeSleeper()
-			transport := newSequenceTransport(
-				response(status, "retry later"),
-				response(http.StatusOK, "ok"),
-			)
-			client := httpclient.New(httpclient.Options{
-				HTTPClient:        &http.Client{Transport: transport},
-				Attempts:          3,
-				RetryBase:         500 * time.Millisecond,
-				RetryFactor:       2,
-				RetryMax:          8 * time.Second,
-				Jitter:            httpclient.NoJitter,
-				Sleeper:           sleeper,
-				MaxRetryBodyBytes: 64,
-			})
+			firstBody := "original response"
+			responses := []any{response(tc.status, firstBody)}
+			wantStatus := tc.status
+			wantBody := firstBody
+			wantRoundTrips := 1
+			var wantDelays []time.Duration
+
+			if tc.retry {
+				firstBody = "retry later"
+				responses[0] = response(tc.status, firstBody)
+				responses = append(responses, response(http.StatusOK, "ok"))
+				wantStatus = http.StatusOK
+				wantBody = "ok"
+				wantRoundTrips = 2
+				wantDelays = []time.Duration{500 * time.Millisecond}
+			}
+
+			transport := newSequenceTransport(responses...)
+			client := newDeterministicClient(transport, sleeper)
 
 			resp, err := client.Do(newGETRequest(t, "https://api.example.test/resource"))
 			if err != nil {
-				t.Fatalf("do request after retryable %d: %v", status, err)
+				t.Fatalf("Client.Do(status %d) error = %v, want nil", tc.status, err)
 			}
 			defer func() {
 				if closeErr := resp.Body.Close(); closeErr != nil {
@@ -132,18 +153,16 @@ func TestDoRetriesRetryableStatusesThenReturnsSuccessfulResponse(t *testing.T) {
 				}
 			}()
 
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			if resp.StatusCode != wantStatus {
+				t.Fatalf("Client.Do(status %d) status = %d, want %d", tc.status, resp.StatusCode, wantStatus)
 			}
-			if got := readBody(t, resp.Body); got != "ok" {
-				t.Fatalf("body = %q, want ok", got)
+			if got := readBody(t, resp.Body); got != wantBody {
+				t.Fatalf("Client.Do(status %d) body = %q, want %q", tc.status, got, wantBody)
 			}
-			if transport.calls() != 2 {
-				t.Fatalf("round trips = %d, want one retry", transport.calls())
+			if transport.calls() != wantRoundTrips {
+				t.Fatalf("Client.Do(status %d) round trips = %d, want %d", tc.status, transport.calls(), wantRoundTrips)
 			}
-			if got, want := sleeper.delays(), []time.Duration{500 * time.Millisecond}; !equalDurations(got, want) {
-				t.Fatalf("retry delays = %v, want %v", got, want)
-			}
+			assertRetryDelays(t, sleeper, wantDelays)
 		})
 	}
 }
@@ -185,59 +204,7 @@ func TestDoUsesExponentialBackoffAndStopsAtAttemptLimit(t *testing.T) {
 	if transport.calls() != 3 {
 		t.Fatalf("round trips = %d, want attempt limit", transport.calls())
 	}
-	gotDelays := sleeper.delays()
-	wantDelays := []time.Duration{500 * time.Millisecond, 750 * time.Millisecond}
-	if !equalDurations(gotDelays, wantDelays) {
-		t.Fatalf("retry delays = %v, want capped exponential backoff %v", gotDelays, wantDelays)
-	}
-}
-
-func TestDoDoesNotRetryNonRetryableClientStatuses(t *testing.T) {
-	for _, status := range []int{
-		http.StatusBadRequest,
-		http.StatusUnauthorized,
-		http.StatusForbidden,
-		http.StatusNotFound,
-		http.StatusUnprocessableEntity,
-	} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			sleeper := newFakeSleeper()
-			transport := newSequenceTransport(response(status, "client problem"))
-			client := httpclient.New(httpclient.Options{
-				HTTPClient:        &http.Client{Transport: transport},
-				Attempts:          3,
-				RetryBase:         500 * time.Millisecond,
-				RetryFactor:       2,
-				RetryMax:          8 * time.Second,
-				Jitter:            httpclient.NoJitter,
-				Sleeper:           sleeper,
-				MaxRetryBodyBytes: 64,
-			})
-
-			resp, err := client.Do(newGETRequest(t, "https://api.example.test/resource"))
-			if err != nil {
-				t.Fatalf("do non-retryable request: %v", err)
-			}
-			defer func() {
-				if closeErr := resp.Body.Close(); closeErr != nil {
-					t.Fatalf("close response body: %v", closeErr)
-				}
-			}()
-
-			if resp.StatusCode != status {
-				t.Fatalf("status = %d, want original %d", resp.StatusCode, status)
-			}
-			if got := readBody(t, resp.Body); got != "client problem" {
-				t.Fatalf("body = %q, want original non-retryable response body", got)
-			}
-			if transport.calls() != 1 {
-				t.Fatalf("round trips = %d, want no retry", transport.calls())
-			}
-			if got := sleeper.delays(); len(got) != 0 {
-				t.Fatalf("retry delays = %v, want none", got)
-			}
-		})
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{500 * time.Millisecond, 750 * time.Millisecond})
 }
 
 func TestDoUsesRetryAfterHeaderBeforeBackoff(t *testing.T) {
@@ -270,9 +237,7 @@ func TestDoUsesRetryAfterHeaderBeforeBackoff(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got, want := sleeper.delays(), []time.Duration{2 * time.Second}; !equalDurations(got, want) {
-		t.Fatalf("retry delays = %v, want Retry-After delay %v", got, want)
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{2 * time.Second})
 }
 
 func TestDoFallsBackToBackoffForInvalidRetryAfterHeader(t *testing.T) {
@@ -293,9 +258,7 @@ func TestDoFallsBackToBackoffForInvalidRetryAfterHeader(t *testing.T) {
 		}
 	}()
 
-	if got, want := sleeper.delays(), []time.Duration{500 * time.Millisecond}; !equalDurations(got, want) {
-		t.Fatalf("retry delays = %v, want backoff %v", got, want)
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{500 * time.Millisecond})
 }
 
 func TestDoClampsPastRetryAfterHTTPDateToZero(t *testing.T) {
@@ -317,9 +280,7 @@ func TestDoClampsPastRetryAfterHTTPDateToZero(t *testing.T) {
 		}
 	}()
 
-	if got, want := sleeper.delays(), []time.Duration{0}; !equalDurations(got, want) {
-		t.Fatalf("retry delays = %v, want clamped zero delay %v", got, want)
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{0})
 }
 
 func TestDoFallsBackToBackoffWhenRetryAfterHeaderIsMissing(t *testing.T) {
@@ -340,9 +301,7 @@ func TestDoFallsBackToBackoffWhenRetryAfterHeaderIsMissing(t *testing.T) {
 		}
 	}()
 
-	if got, want := sleeper.delays(), []time.Duration{500 * time.Millisecond}; !equalDurations(got, want) {
-		t.Fatalf("retry delays = %v, want backoff %v", got, want)
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{500 * time.Millisecond})
 }
 
 func TestDoUsesDefaultSleeperWithCanceledContext(t *testing.T) {
@@ -483,6 +442,7 @@ func TestDoStopsRetriesWhenContextIsCanceled(t *testing.T) {
 	if transport.calls() != 1 {
 		t.Fatalf("round trips = %d, want no retry after cancellation", transport.calls())
 	}
+	assertRetryDelays(t, sleeper, []time.Duration{500 * time.Millisecond})
 }
 
 func TestDoRetriesNetworkResetThenReturnsSuccessfulResponse(t *testing.T) {
@@ -519,9 +479,7 @@ func TestDoRetriesNetworkResetThenReturnsSuccessfulResponse(t *testing.T) {
 	if transport.calls() != 2 {
 		t.Fatalf("round trips = %d, want retry after connection reset", transport.calls())
 	}
-	if got, want := sleeper.delays(), []time.Duration{500 * time.Millisecond}; !equalDurations(got, want) {
-		t.Fatalf("retry delays = %v, want %v", got, want)
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{500 * time.Millisecond})
 }
 
 func TestDoRetriesNetworkTimeoutAndWrapsExhaustedError(t *testing.T) {
@@ -559,9 +517,7 @@ func TestDoRetriesNetworkTimeoutAndWrapsExhaustedError(t *testing.T) {
 	if transport.calls() != 2 {
 		t.Fatalf("round trips = %d, want retry through attempt limit", transport.calls())
 	}
-	if got, want := sleeper.delays(), []time.Duration{500 * time.Millisecond}; !equalDurations(got, want) {
-		t.Fatalf("retry delays = %v, want %v", got, want)
-	}
+	assertRetryDelays(t, sleeper, []time.Duration{500 * time.Millisecond})
 }
 
 func TestDoDoesNotRetryCanceledContextBeforeRequest(t *testing.T) {
@@ -601,9 +557,7 @@ func TestDoDoesNotRetryCanceledContextBeforeRequest(t *testing.T) {
 	if transport.calls() != 1 {
 		t.Fatalf("round trips = %d, want no retry for canceled context", transport.calls())
 	}
-	if got := sleeper.delays(); len(got) != 0 {
-		t.Fatalf("retry delays = %v, want none", got)
-	}
+	assertRetryDelays(t, sleeper, nil)
 }
 
 func TestDoDoesNotRetryWhenContextIsCanceledAfterTransportError(t *testing.T) {
@@ -639,9 +593,7 @@ func TestDoDoesNotRetryWhenContextIsCanceledAfterTransportError(t *testing.T) {
 	if !errors.Is(err, injectedErr) {
 		t.Fatalf("do canceled request error = %v, want wrapped transport error", err)
 	}
-	if got := sleeper.delays(); len(got) != 0 {
-		t.Fatalf("retry delays = %v, want none", got)
-	}
+	assertRetryDelays(t, sleeper, nil)
 }
 
 func TestDoReplaysRequestBodyWithGetBody(t *testing.T) {
@@ -663,7 +615,7 @@ func TestDoReplaysRequestBodyWithGetBody(t *testing.T) {
 		}
 	}()
 
-	if got, want := transport.requestBodies(), []string{"payload", "payload"}; !equalStrings(got, want) {
+	if got, want := transport.requestBodies(), []string{"payload", "payload"}; !slices.Equal(got, want) {
 		t.Fatalf("request bodies = %q, want replayed bodies %q", got, want)
 	}
 	if transport.calls() != 2 {
@@ -701,9 +653,7 @@ func TestDoDoesNotRetryNonReplayableRequestBodyAfterTransportError(t *testing.T)
 	if transport.calls() != 1 {
 		t.Fatalf("round trips = %d, want no retry for non-replayable body", transport.calls())
 	}
-	if got := sleeper.delays(); len(got) != 0 {
-		t.Fatalf("retry delays = %v, want none", got)
-	}
+	assertRetryDelays(t, sleeper, nil)
 }
 
 func TestDoReturnsWrappedErrorWhenGetBodyFails(t *testing.T) {
@@ -861,28 +811,11 @@ func readBody(t *testing.T, body io.Reader) string {
 	return string(data)
 }
 
-func equalDurations(got []time.Duration, want []time.Duration) bool {
-	if len(got) != len(want) {
-		return false
+func assertRetryDelays(t *testing.T, sleeper *fakeSleeper, want []time.Duration) {
+	t.Helper()
+	if got := sleeper.delays(); !slices.Equal(got, want) {
+		t.Fatalf("retry delays = %v, want %v", got, want)
 	}
-	for index := range got {
-		if got[index] != want[index] {
-			return false
-		}
-	}
-	return true
-}
-
-func equalStrings(got []string, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for index := range got {
-		if got[index] != want[index] {
-			return false
-		}
-	}
-	return true
 }
 
 type fakeSleeper struct {
@@ -896,6 +829,10 @@ func newFakeSleeper() *fakeSleeper {
 }
 
 func (sleeper *fakeSleeper) Sleep(ctx context.Context, delay time.Duration) error {
+	sleeper.mu.Lock()
+	sleeper.delaysSeen = append(sleeper.delaysSeen, delay)
+	sleeper.mu.Unlock()
+
 	if sleeper.beforeSleep != nil {
 		sleeper.beforeSleep()
 	}
@@ -903,12 +840,8 @@ func (sleeper *fakeSleeper) Sleep(ctx context.Context, delay time.Duration) erro
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+		return nil
 	}
-
-	sleeper.mu.Lock()
-	defer sleeper.mu.Unlock()
-	sleeper.delaysSeen = append(sleeper.delaysSeen, delay)
-	return nil
 }
 
 func (sleeper *fakeSleeper) delays() []time.Duration {
