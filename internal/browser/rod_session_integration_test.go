@@ -215,6 +215,98 @@ async function submitQuery() {
 	}
 }
 
+func TestRodPoolWaitAttachedFindsHiddenElement(t *testing.T) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/attach":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html>
+<title>Attach page</title>
+<button id="attach" onclick="attachHidden()">Attach hidden marker</button>
+<script>
+function attachHidden() {
+  const marker = document.createElement('p');
+  marker.id = 'attached';
+  marker.hidden = true;
+  marker.textContent = 'attached but hidden';
+  document.body.appendChild(marker);
+}
+</script>`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	pool := newBrowserPool(t)
+	ctx := newBrowserTestContext(t, 20*time.Second)
+
+	page, err := pool.OpenPage(ctx, OpenPageRequest{
+		ProfileName: "research",
+		SessionName: "attached-wait",
+		URL:         server.URL + "/attach",
+	})
+	handleBrowserUnavailable(t, err)
+	if err != nil {
+		t.Fatalf("OpenPage(attach page) error = %v, want nil", err)
+	}
+	if err := pool.Click(ctx, InteractionRequest{
+		ProfileName: "research",
+		SessionName: "attached-wait",
+		PageID:      page.ID,
+		Selector:    "#attach",
+	}); err != nil {
+		t.Fatalf("Click(attach hidden marker) error = %v, want nil", err)
+	}
+	if err := pool.Wait(ctx, WaitRequest{
+		ProfileName: "research",
+		SessionName: "attached-wait",
+		PageID:      page.ID,
+		Selector:    "#attached",
+		State:       WaitAttached,
+	}); err != nil {
+		t.Fatalf("Wait(attached hidden marker) error = %v, want nil", err)
+	}
+}
+
+func TestRodPoolDetectManualChallengeIgnoresNormalPage(t *testing.T) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/normal":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html><title>Normal page</title><main>Research notes without a challenge.</main>`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	pool := newBrowserPool(t)
+	ctx := newBrowserTestContext(t, 15*time.Second)
+
+	page, err := pool.OpenPage(ctx, OpenPageRequest{
+		ProfileName: "research",
+		SessionName: "normal-challenge",
+		URL:         server.URL + "/normal",
+	})
+	handleBrowserUnavailable(t, err)
+	if err != nil {
+		t.Fatalf("OpenPage(normal page) error = %v, want nil", err)
+	}
+	got, err := pool.DetectManualChallenge(ctx, ManualChallengeRequest{
+		ProfileName: "research",
+		SessionName: "normal-challenge",
+		PageID:      page.ID,
+	})
+	if err != nil {
+		t.Fatalf("DetectManualChallenge(normal page) error = %v, want nil", err)
+	}
+	if got.ManualRequired || got.Solved {
+		t.Fatalf("DetectManualChallenge(normal page) = %#v, want no manual challenge and unsolved", got)
+	}
+	if hasWarning(got.Warnings, content.WarningCaptchaPossible) {
+		t.Fatalf("DetectManualChallenge(normal page) warnings = %#v, want no captcha_possible", got.Warnings)
+	}
+}
+
 func accessibilityTreeHasName(tree AccessibilityTree, name string) bool {
 	for _, node := range tree.Nodes {
 		if node.Name == name {
