@@ -1,10 +1,5 @@
 package x
 
-const (
-	searchNextToken    = "next_token"
-	userPostsNextToken = "pagination_token"
-)
-
 type xPostListResponse struct {
 	Data     []xPost       `json:"data"`
 	Includes xIncludes     `json:"includes"`

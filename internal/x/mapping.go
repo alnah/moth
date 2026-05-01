@@ -67,15 +67,3 @@ func usersByID(users []xUser) map[string]xUser {
 
 	return usersByID
 }
-
-func addStringMetadata(metadata map[string]any, key string, value string) {
-	if value != "" {
-		metadata[key] = value
-	}
-}
-
-func addIntMetadata(metadata map[string]any, key string, value int) {
-	if value != 0 {
-		metadata[key] = value
-	}
-}
