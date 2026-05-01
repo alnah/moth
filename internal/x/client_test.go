@@ -2,9 +2,11 @@ package x
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -126,6 +128,23 @@ func TestSearchRecentDefaultsToTenResultsAndOneRequest(t *testing.T) {
 	}
 }
 
+func TestSearchRecentUsesExplicitNextToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertXBearerRequest(t, r, "/2/tweets/search/recent")
+		assertQueryValue(t, r.URL.Query().Get("next_token"), "older-page", "next_token")
+		writeXJSON(t, w, `{"data":[], "meta":{"result_count":0}}`)
+	}))
+	defer server.Close()
+
+	_, err := newXTestClient(server).SearchRecent(context.Background(), SearchOptions{
+		Query:     "go",
+		NextToken: "older-page",
+	})
+	if err != nil {
+		t.Fatalf("SearchRecent(NextToken) error = %v, want nil", err)
+	}
+}
+
 func TestLookupPostMapsTextAuthorDateAndPermalink(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertXBearerRequest(t, r, "/2/tweets/20")
@@ -163,6 +182,45 @@ func TestLookupPostMapsTextAuthorDateAndPermalink(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, pack, cmpopts.EquateEmpty()); diff != "" {
 		t.Fatalf("LookupPost() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLookupPostUsesPermalinkFallbackWhenAuthorUsernameMissing(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		assertXBearerRequest(t, r, "/2/tweets/20")
+		writeXJSON(t, w, `{
+			"data": {"id":"20", "text":"Single lookup", "author_id":"100"},
+			"includes": {"users": [{"id":"100", "name":"Go"}]}
+		}`)
+	}))
+	defer server.Close()
+
+	pack, err := newXTestClient(server).LookupPost(context.Background(), LookupPostOptions{ID: "20"})
+	if err != nil {
+		t.Fatalf("LookupPost(username missing) error = %v, want nil", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("LookupPost(username missing) requests = %d, want 1", got)
+	}
+
+	want := content.Pack{
+		Type: content.TypeContentPack,
+		Items: []content.Item{{
+			Kind:  content.KindSocialPost,
+			URL:   "https://x.com/i/web/status/20",
+			Title: "Go",
+			Text:  "Single lookup",
+			Metadata: map[string]any{
+				"post_id":     "20",
+				"author_id":   "100",
+				"author_name": "Go",
+			},
+		}},
+	}
+	if diff := cmp.Diff(want, pack, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("LookupPost(username missing) mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -248,6 +306,23 @@ func TestUserPostsExplicitMaxRequestsFollowsPaginationWithinBudget(t *testing.T)
 	}
 }
 
+func TestUserPostsUsesExplicitNextToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertXBearerRequest(t, r, "/2/users/100/tweets")
+		assertQueryValue(t, r.URL.Query().Get("pagination_token"), "older-page", "pagination_token")
+		writeXJSON(t, w, `{"data":[], "meta":{"result_count":0}}`)
+	}))
+	defer server.Close()
+
+	_, err := newXTestClient(server).UserPosts(context.Background(), UserPostsOptions{
+		UserID:    "100",
+		NextToken: "older-page",
+	})
+	if err != nil {
+		t.Fatalf("UserPosts(NextToken) error = %v, want nil", err)
+	}
+}
+
 func TestMissingBearerTokenReturnsNotConfiguredBeforeRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("SearchRecent() made request without bearer token to %s", r.URL.String())
@@ -319,6 +394,49 @@ func TestMalformedResponseReturnsDecodeError(t *testing.T) {
 	assertErrorContains(t, err, "decode")
 }
 
+func TestTransportErrorRedactsBearerTokenAndUnwrapsCause(t *testing.T) {
+	bearerToken := "secret/token value+"
+	cause := errors.New("dial failed with " + bearerToken + " and " + url.QueryEscape(bearerToken))
+	client := NewClient(Config{
+		Settings: config.Settings{XBearerToken: bearerToken},
+		BaseURL:  "https://api.example.test",
+		HTTPClient: httpclient.New(httpclient.Options{
+			HTTPClient: &http.Client{Transport: failingRoundTripper{err: cause}},
+			Attempts:   1,
+		}),
+	})
+
+	_, err := client.SearchRecent(context.Background(), SearchOptions{Query: "go"})
+	assertErrorContains(t, err, "x recent search request")
+	assertErrorContains(t, err, "[redacted]")
+	assertErrorDoesNotContain(t, err, bearerToken)
+	assertErrorDoesNotContain(t, err, url.QueryEscape(bearerToken))
+	if !errors.Is(err, cause) {
+		t.Fatalf("SearchRecent(transport error) error = %v, want to unwrap %v", err, cause)
+	}
+}
+
+func TestStatusErrorRedactsBearerTokenFromProviderBody(t *testing.T) {
+	bearerToken := "secret/token value+"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+bearerToken {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		w.WriteHeader(http.StatusForbidden)
+		writeXJSON(t, w, `{"detail":"`+bearerToken+` `+url.QueryEscape(bearerToken)+`"}`)
+	}))
+	defer server.Close()
+
+	_, err := NewClient(Config{
+		Settings: config.Settings{XBearerToken: bearerToken},
+		BaseURL:  server.URL,
+	}).SearchRecent(context.Background(), SearchOptions{Query: "tier gated"})
+	assertErrorContains(t, err, "access denied")
+	assertErrorContains(t, err, "[redacted]")
+	assertErrorDoesNotContain(t, err, bearerToken)
+	assertErrorDoesNotContain(t, err, url.QueryEscape(bearerToken))
+}
+
 func newXTestClient(server *httptest.Server) *Client {
 	return NewClient(Config{
 		Settings: config.Settings{XBearerToken: xTestBearerToken},
@@ -380,6 +498,25 @@ func assertErrorContains(t *testing.T, err error, want string) {
 	if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {
 		t.Fatalf("error = %v, want substring %q", err, want)
 	}
+}
+
+func assertErrorDoesNotContain(t *testing.T, err error, forbidden string) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("error = nil, want no substring %q", forbidden)
+	}
+	if strings.Contains(err.Error(), forbidden) {
+		t.Fatalf("error = %v, want no substring %q", err, forbidden)
+	}
+}
+
+type failingRoundTripper struct {
+	err error
+}
+
+func (transport failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, transport.err
 }
 
 type noWaitSleeper struct{}
