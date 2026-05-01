@@ -3,9 +3,10 @@ package browser
 import (
 	"context"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/alnah/moth/internal/content"
 )
@@ -45,8 +46,15 @@ func assertPageIDs(t *testing.T, pages []PageInfo, want []string) {
 	for _, page := range pages {
 		got = append(got, page.ID)
 	}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("page IDs = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("page IDs mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertSurfaceActions(t *testing.T, got []surfaceAction, want []surfaceAction) {
+	t.Helper()
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("surface actions mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -120,25 +120,9 @@ func TestInteractiveOperationsUseSelectedActivePageAndStayGeneric(t *testing.T) 
 		t.Fatalf("Wait() error = %v, want nil", err)
 	}
 
-	actions := worker.actions()
-	if len(actions) != 3 {
-		t.Fatalf("actions len = %d, want 3", len(actions))
-	}
-	for _, action := range actions {
-		if action.PageID != first.ID {
-			t.Fatalf("action %#v used page %q, want active page %q", action, action.PageID, first.ID)
-		}
-	}
-	firstActionMatches := actions[0].Kind == "input" &&
-		actions[0].Selector == `input[name="email"]` &&
-		actions[0].Text == "alexis@example.test"
-	if !firstActionMatches {
-		t.Fatalf("first action = %#v, want generic input", actions[0])
-	}
-	if actions[1].Kind != "click" || actions[1].Selector != "button[type=submit]" {
-		t.Fatalf("second action = %#v, want generic click", actions[1])
-	}
-	if actions[2].Kind != "wait" || actions[2].Selector != "main.account" {
-		t.Fatalf("third action = %#v, want generic wait", actions[2])
-	}
+	assertSurfaceActions(t, worker.actions(), []surfaceAction{
+		{Kind: "input", PageID: first.ID, Selector: `input[name="email"]`, Text: "alexis@example.test"},
+		{Kind: "click", PageID: first.ID, Selector: "button[type=submit]"},
+		{Kind: "wait", PageID: first.ID, Selector: "main.account"},
+	})
 }

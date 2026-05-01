@@ -3,9 +3,7 @@
 package browser
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -13,7 +11,7 @@ import (
 )
 
 func TestRodPoolPersistentSessionSwitchCloseAndChallenge(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/one":
@@ -25,13 +23,10 @@ func TestRodPoolPersistentSessionSwitchCloseAndChallenge(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
 
-	pool := NewPool(1)
-	defer func() { _ = pool.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	pool := newBrowserPool(t)
+	ctx := newBrowserTestContext(t, 20*time.Second)
 
 	first, err := pool.OpenPage(ctx, OpenPageRequest{
 		ProfileName: "research",
@@ -129,7 +124,7 @@ func TestRodPoolPersistentSessionSwitchCloseAndChallenge(t *testing.T) {
 
 func TestRodPoolInputsClicksWaitsAndReadsAccessibilityTree(t *testing.T) {
 	submissions := make(chan string, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/form":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -155,13 +150,10 @@ async function submitQuery() {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
 
-	pool := NewPool(1)
-	defer func() { _ = pool.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	pool := newBrowserPool(t)
+	ctx := newBrowserTestContext(t, 20*time.Second)
 
 	page, err := pool.OpenPage(ctx, OpenPageRequest{
 		ProfileName: "research",

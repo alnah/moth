@@ -3,10 +3,7 @@
 package browser
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +11,7 @@ import (
 )
 
 func TestRodPoolFetchesRenderedPageAndWritesScreenshot(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -29,13 +26,10 @@ func TestRodPoolFetchesRenderedPageAndWritesScreenshot(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
 
-	pool := NewPool(1)
-	defer func() { _ = pool.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	pool := newBrowserPool(t)
+	ctx := newBrowserTestContext(t, 15*time.Second)
 
 	item, err := pool.FetchPage(ctx, PageRequest{URL: server.URL + "/"})
 	handleBrowserUnavailable(t, err)
@@ -53,11 +47,5 @@ func TestRodPoolFetchesRenderedPageAndWritesScreenshot(t *testing.T) {
 	if err := pool.Screenshot(ctx, ScreenshotRequest{URL: server.URL + "/", Path: screenshotPath, FullPage: true}); err != nil {
 		t.Fatalf("Screenshot(real Rod) error = %v, want nil", err)
 	}
-	info, err := os.Stat(screenshotPath)
-	if err != nil {
-		t.Fatalf("stat screenshot: %v", err)
-	}
-	if info.Size() == 0 {
-		t.Fatal("screenshot size = 0, want bytes")
-	}
+	requireNonEmptyFile(t, screenshotPath)
 }

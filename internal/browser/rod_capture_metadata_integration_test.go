@@ -3,10 +3,7 @@
 package browser
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -15,7 +12,7 @@ import (
 )
 
 func TestRodPoolCapturesPDFAndResponseMetadata(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/print":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -28,13 +25,10 @@ func TestRodPoolCapturesPDFAndResponseMetadata(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
 
-	pool := NewPool(1)
-	defer func() { _ = pool.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	pool := newBrowserPool(t)
+	ctx := newBrowserTestContext(t, 20*time.Second)
 
 	pdfPath := filepath.Join(t.TempDir(), "page.pdf")
 	err := pool.PDF(ctx, PDFRequest{URL: server.URL + "/print", Path: pdfPath})
@@ -42,13 +36,7 @@ func TestRodPoolCapturesPDFAndResponseMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PDF(real Rod page) error = %v, want nil", err)
 	}
-	pdfBytes, err := os.ReadFile(pdfPath)
-	if err != nil {
-		t.Fatalf("read captured PDF: %v", err)
-	}
-	if !strings.HasPrefix(string(pdfBytes), "%PDF-") {
-		t.Fatalf("captured PDF prefix = %q, want %%PDF-", string(pdfBytes[:min(len(pdfBytes), 8)]))
-	}
+	requireFilePrefix(t, pdfPath, "%PDF-")
 
 	metadata, err := pool.ResponseMetadata(ctx, ResponseMetadataRequest{
 		URL:            server.URL + "/metadata",
@@ -70,7 +58,7 @@ func TestRodPoolCapturesPDFAndResponseMetadata(t *testing.T) {
 
 func TestRodPoolBlocksConfiguredImageResources(t *testing.T) {
 	var imageRequests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newBrowserTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/page":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -85,13 +73,10 @@ func TestRodPoolBlocksConfiguredImageResources(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
 
-	pool := NewPool(1, WithBlockedResources(ResourceImages))
-	defer func() { _ = pool.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	pool := newBrowserPool(t, WithBlockedResources(ResourceImages))
+	ctx := newBrowserTestContext(t, 20*time.Second)
 
 	item, err := pool.FetchPage(ctx, PageRequest{URL: server.URL + "/page"})
 	handleBrowserUnavailable(t, err)
