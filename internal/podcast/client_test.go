@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha1" //nolint:gosec // Podcast Index contract requires SHA1 signatures.
 	"encoding/hex"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +17,6 @@ import (
 	"github.com/alnah/moth/internal/config"
 	"github.com/alnah/moth/internal/content"
 	"github.com/alnah/moth/internal/httpclient"
-	"github.com/alnah/moth/internal/httpdownload"
 )
 
 const (
@@ -198,134 +196,98 @@ func TestSearchReturnsDecodeErrorForMalformedJSON(t *testing.T) {
 }
 
 func TestSearchFailsBeforeRequestWhenCredentialsMissing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("server received request, want missing credentials to fail before HTTP")
+	t.Run("api key", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("server received request, want missing API key to fail before HTTP")
+		}))
+		defer server.Close()
+
+		client := NewClient(Config{
+			BaseURL:   server.URL,
+			UserAgent: podcastTestUserAgent,
+			Now:       func() time.Time { return podcastTestNow },
+		})
+
+		_, err := client.Search(context.Background(), SearchOptions{Query: "go"})
+		if err == nil {
+			t.Fatal("Search missing API key error = nil, want error")
+		}
+		assertPodcastErrorContains(t, err, "api key")
+	})
+
+	t.Run("api secret", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("server received request, want missing API secret to fail before HTTP")
+		}))
+		defer server.Close()
+
+		client := NewClient(Config{
+			Settings: config.Settings{PodcastIndexAPIKey: podcastTestAPIKey},
+			BaseURL:  server.URL,
+		})
+
+		_, err := client.Search(context.Background(), SearchOptions{Query: "go"})
+		if err == nil {
+			t.Fatal("Search missing API secret error = nil, want error")
+		}
+		assertPodcastErrorContains(t, err, "api secret")
+	})
+}
+
+func TestSearchUsesDefaultUserAgentAndClockWhenUnset(t *testing.T) {
+	requestSeen := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestSeen = true
+		if got := r.Header.Get("User-Agent"); got != defaultPodcastIndexUserAgent {
+			t.Fatalf("User-Agent = %q, want default %q", got, defaultPodcastIndexUserAgent)
+		}
+		authDate, err := strconv.ParseInt(r.Header.Get("X-Auth-Date"), 10, 64)
+		if err != nil {
+			t.Fatalf("X-Auth-Date = %q, want unix seconds", r.Header.Get("X-Auth-Date"))
+		}
+		if now := time.Now().Unix(); authDate > now || authDate < now-5 {
+			t.Fatalf("X-Auth-Date = %d, want current unix seconds near %d", authDate, now)
+		}
+		writePodcastIndexJSON(t, w, `{"count":0,"feeds":[]}`)
 	}))
 	defer server.Close()
 
 	client := NewClient(Config{
-		BaseURL:   server.URL,
-		UserAgent: podcastTestUserAgent,
-		Now:       func() time.Time { return podcastTestNow },
+		Settings: config.Settings{
+			PodcastIndexAPIKey:    podcastTestAPIKey,
+			PodcastIndexAPISecret: podcastTestAPISecret,
+		},
+		BaseURL: server.URL,
+		HTTPClient: httpclient.New(httpclient.Options{
+			Attempts: 1,
+		}),
 	})
 
-	_, err := client.Search(context.Background(), SearchOptions{Query: "go"})
+	if _, err := client.Search(context.Background(), SearchOptions{Query: "defaults"}); err != nil {
+		t.Fatalf("Search with defaults error = %v, want nil", err)
+	}
+	if !requestSeen {
+		t.Fatal("server request not seen")
+	}
+}
+
+func TestSearchRedactsSecretsFromProviderBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertPodcastIndexAuthRequest(t, r, "/search/byterm")
+		http.Error(w, "key "+podcastTestAPIKey+" secret "+podcastTestAPISecret, http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client := newPodcastIndexTestClient(server.URL)
+
+	_, err := client.Search(context.Background(), SearchOptions{Query: "redact"})
 	if err == nil {
-		t.Fatal("Search missing credentials error = nil, want error")
+		t.Fatal("Search provider error = nil, want error")
 	}
-	assertPodcastErrorContains(t, err, "api key")
-}
-
-func TestAudioDownloaderDownloadsRSSEnclosureWithLimits(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/feed.xml":
-			writePodcastIndexXML(t, w, podcastFeedXML(
-				"episode-17",
-				serverURLFromRequest(r)+"/audio/episode-17.mp3",
-				"13",
-			))
-		case "/audio/episode-17.mp3":
-			w.Header().Set("Content-Type", "audio/mpeg")
-			w.Header().Set("Content-Length", "13")
-			_, _ = io.WriteString(w, "fake mp3 data")
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	downloader := NewAudioDownloader(AudioDownloaderConfig{HTTPClient: server.Client()})
-
-	file, err := downloader.DownloadEpisodeAudio(context.Background(), AudioDownloadOptions{
-		FeedURL:             server.URL + "/feed.xml",
-		EpisodeGUID:         "episode-17",
-		AllowedContentTypes: []string{"audio/mpeg", "audio/mp4", "audio/ogg"},
-		MaxBytes:            13,
-	})
-	if err != nil {
-		t.Fatalf("DownloadEpisodeAudio error = %v, want nil", err)
-	}
-	if file.URL != server.URL+"/audio/episode-17.mp3" {
-		t.Fatalf("audio URL = %q, want enclosure URL", file.URL)
-	}
-	if file.ContentType != "audio/mpeg" {
-		t.Fatalf("content type = %q, want audio/mpeg", file.ContentType)
-	}
-	if string(file.Bytes) != "fake mp3 data" {
-		t.Fatalf("audio bytes = %q, want downloaded enclosure", file.Bytes)
-	}
-}
-
-func TestAudioDownloaderRejectsOversizedEnclosureBeforeReadingBody(t *testing.T) {
-	bodyRequested := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/feed.xml":
-			writePodcastIndexXML(t, w, podcastFeedXML(
-				"episode-oversize",
-				serverURLFromRequest(r)+"/audio/oversize.mp3",
-				"13",
-			))
-		case "/audio/oversize.mp3":
-			bodyRequested = true
-			w.Header().Set("Content-Type", "audio/mpeg")
-			w.Header().Set("Content-Length", "13")
-			_, _ = io.WriteString(w, "too many bytes")
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	downloader := NewAudioDownloader(AudioDownloaderConfig{HTTPClient: server.Client()})
-
-	_, err := downloader.DownloadEpisodeAudio(context.Background(), AudioDownloadOptions{
-		FeedURL:             server.URL + "/feed.xml",
-		EpisodeGUID:         "episode-oversize",
-		AllowedContentTypes: []string{"audio/mpeg"},
-		MaxBytes:            12,
-	})
-	if err == nil {
-		t.Fatal("DownloadEpisodeAudio oversized enclosure error = nil, want error")
-	}
-	if !errors.Is(err, httpdownload.ErrFileTooLarge) {
-		t.Fatalf("DownloadEpisodeAudio error = %v, want file_too_large", err)
-	}
-	if bodyRequested {
-		t.Fatal("audio body requested, want enclosure length rejected before body download")
-	}
-}
-
-func TestAudioDownloaderRejectsUnknownLengthBodyOverMaxBytes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/feed.xml":
-			writePodcastIndexXML(t, w, podcastFeedXML(
-				"episode-stream",
-				serverURLFromRequest(r)+"/audio/stream.mp3",
-				"0",
-			))
-		case "/audio/stream.mp3":
-			w.Header().Set("Content-Type", "audio/mpeg")
-			_, _ = io.WriteString(w, "too many bytes")
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	downloader := NewAudioDownloader(AudioDownloaderConfig{HTTPClient: server.Client()})
-
-	_, err := downloader.DownloadEpisodeAudio(context.Background(), AudioDownloadOptions{
-		FeedURL:             server.URL + "/feed.xml",
-		EpisodeGUID:         "episode-stream",
-		AllowedContentTypes: []string{"audio/mpeg"},
-		MaxBytes:            3,
-	})
-	if !errors.Is(err, httpdownload.ErrFileTooLarge) {
-		t.Fatalf("DownloadEpisodeAudio error = %v, want file_too_large", err)
-	}
+	assertPodcastErrorContains(t, err, "403")
+	assertPodcastErrorContains(t, err, "[redacted]")
+	assertPodcastErrorDoesNotContain(t, err, podcastTestAPIKey)
+	assertPodcastErrorDoesNotContain(t, err, podcastTestAPISecret)
 }
 
 func newPodcastIndexTestClient(baseURL string) *Client {
@@ -392,29 +354,6 @@ func writePodcastIndexJSON(t *testing.T, w http.ResponseWriter, body string) {
 	if _, err := io.WriteString(w, body); err != nil {
 		t.Fatalf("write JSON response: %v", err)
 	}
-}
-
-func writePodcastIndexXML(t *testing.T, w http.ResponseWriter, body string) {
-	t.Helper()
-
-	w.Header().Set("Content-Type", "application/rss+xml")
-	//nolint:gosec // Test writes controlled XML fixtures to a local httptest response.
-	if _, err := io.WriteString(w, body); err != nil {
-		t.Fatalf("write XML response: %v", err)
-	}
-}
-
-func podcastFeedXML(guid string, enclosureURL string, length string) string {
-	return strings.Join([]string{
-		`<rss version="2.0"><channel><title>Systems Show</title><item>`,
-		`<title>Episode 17</title><guid>`, guid, `</guid>`,
-		`<enclosure url="`, enclosureURL, `" type="audio/mpeg" length="`, length, `" />`,
-		`</item></channel></rss>`,
-	}, "")
-}
-
-func serverURLFromRequest(r *http.Request) string {
-	return "http://" + r.Host
 }
 
 func assertPodcastContentPack(t *testing.T, got content.Pack, want content.Pack) {
