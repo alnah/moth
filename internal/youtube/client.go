@@ -23,7 +23,10 @@ const (
 	responseBodyMax = 4096
 )
 
-var validVideoID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var (
+	validVideoID       = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	youtubeAPIKeyParam = regexp.MustCompile(`([?&]key=)[^&\s]+`)
+)
 
 // Config contains YouTube API dependencies and credentials.
 type Config struct {
@@ -52,6 +55,19 @@ type Client struct {
 	settings   config.Settings
 	baseURL    string
 	httpClient *httpclient.Client
+}
+
+type redactedYouTubeError struct {
+	message string
+	err     error
+}
+
+func (err redactedYouTubeError) Error() string {
+	return err.message
+}
+
+func (err redactedYouTubeError) Unwrap() error {
+	return err.err
 }
 
 // NewClient creates a YouTube client with defaults for unset dependencies.
@@ -119,14 +135,14 @@ func (client *Client) get(ctx context.Context, path string, query url.Values, op
 
 	resp, err := client.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("youtube %s request: %w", operation, err)
+		return youtubeTransportError(operation, err, apiKey)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return youtubeStatusError(operation, resp)
+		return youtubeStatusError(operation, resp, apiKey)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
 		return fmt.Errorf("youtube %s decode response: %w", operation, err)
@@ -180,7 +196,27 @@ func validateVideoIDs(ids []string) error {
 	return nil
 }
 
-func youtubeStatusError(operation string, resp *http.Response) error {
+func youtubeTransportError(operation string, err error, apiKey string) error {
+	return redactedYouTubeError{
+		message: fmt.Sprintf("youtube %s request: %s", operation, redactYouTubeSecret(err.Error(), apiKey)),
+		err:     err,
+	}
+}
+
+func youtubeStatusError(operation string, resp *http.Response, apiKey string) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, responseBodyMax))
-	return fmt.Errorf("youtube %s failed: status %d: %s", operation, resp.StatusCode, strings.TrimSpace(string(body)))
+	message := redactYouTubeSecret(strings.TrimSpace(string(body)), apiKey)
+
+	return fmt.Errorf("youtube %s failed: status %d: %s", operation, resp.StatusCode, message)
+}
+
+func redactYouTubeSecret(message string, apiKey string) string {
+	message = youtubeAPIKeyParam.ReplaceAllString(message, `${1}[redacted]`)
+	if apiKey == "" {
+		return message
+	}
+	message = strings.ReplaceAll(message, apiKey, "[redacted]")
+	message = strings.ReplaceAll(message, url.QueryEscape(apiKey), "[redacted]")
+
+	return message
 }

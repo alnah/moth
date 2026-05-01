@@ -1,6 +1,10 @@
 package ytdlp
 
-import "github.com/alnah/moth/internal/content"
+import (
+	"sort"
+
+	"github.com/alnah/moth/internal/content"
+)
 
 func mapMetadata(metadata ytdlpMetadata) content.Item {
 	return content.Item{
@@ -40,4 +44,14 @@ func addStringSliceMetadata(metadata map[string]any, key string, values []string
 	if len(values) != 0 {
 		metadata[key] = values
 	}
+}
+
+func sortedMapKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	return keys
 }
