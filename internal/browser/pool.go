@@ -133,44 +133,27 @@ func (pool *Pool) Close() error {
 
 // FetchPage serializes work by registrable domain and extracts normalized page content.
 func (pool *Pool) FetchPage(ctx context.Context, request PageRequest) (content.Item, error) {
-	releaseDomain, err := pool.domains.acquire(ctx, request.URL)
-	if err != nil {
-		return content.Item{}, err
-	}
-	defer releaseDomain()
-
-	worker, err := pool.Acquire(ctx)
-	if err != nil {
-		return content.Item{}, err
-	}
-	defer pool.Release(worker)
-
-	loadedPage, err := worker.OpenPage(ctx, request)
-	if err != nil {
-		return content.Item{}, err
-	}
-	return extractPageItem(loadedPage)
+	var item content.Item
+	err := pool.withDomainWorker(ctx, request.URL, func(worker Worker) error {
+		loadedPage, err := worker.OpenPage(ctx, request)
+		if err != nil {
+			return err
+		}
+		item, err = extractPageItem(loadedPage)
+		return err
+	})
+	return item, err
 }
 
 // Screenshot serializes work by registrable domain and writes a rendered screenshot.
 func (pool *Pool) Screenshot(ctx context.Context, request ScreenshotRequest) error {
-	releaseDomain, err := pool.domains.acquire(ctx, request.URL)
-	if err != nil {
-		return err
-	}
-	defer releaseDomain()
-
-	worker, err := pool.Acquire(ctx)
-	if err != nil {
-		return err
-	}
-	defer pool.Release(worker)
-
-	image, err := worker.CaptureScreenshot(ctx, request)
-	if err != nil {
-		return err
-	}
-	return writeBrowserFile(request.Path, image, "screenshot")
+	return pool.withDomainWorker(ctx, request.URL, func(worker Worker) error {
+		image, err := worker.CaptureScreenshot(ctx, request)
+		if err != nil {
+			return err
+		}
+		return writeBrowserFile(request.Path, image, "screenshot")
+	})
 }
 
 // OpenPage opens a persistent browser page and makes it active for its session.
@@ -182,15 +165,12 @@ func (pool *Pool) OpenPage(ctx context.Context, request OpenPageRequest) (PageIn
 	defer releaseDomain()
 
 	var page PageInfo
-	err = pool.withSessionWorker(ctx, SessionRequest{
+	err = pool.withPersistentSessionWorker(ctx, SessionRequest{
 		ProfileName: request.ProfileName,
 		SessionName: request.SessionName,
-	}, true, func(worker Worker) error {
-		persistentWorker, workerErr := requirePersistentPageWorker(worker)
-		if workerErr != nil {
-			return workerErr
-		}
-		page, workerErr = persistentWorker.OpenPersistentPage(ctx, request)
+	}, true, func(worker persistentPageWorker) error {
+		var workerErr error
+		page, workerErr = worker.OpenPersistentPage(ctx, request)
 		return workerErr
 	})
 	return page, err
@@ -203,12 +183,9 @@ func (pool *Pool) ListPages(ctx context.Context, request SessionRequest) ([]Page
 	}
 
 	var pages []PageInfo
-	err := pool.withSessionWorker(ctx, request, false, func(worker Worker) error {
-		persistentWorker, err := requirePersistentPageWorker(worker)
-		if err != nil {
-			return err
-		}
-		pages, err = persistentWorker.ListPersistentPages(ctx, request)
+	err := pool.withPersistentSessionWorker(ctx, request, false, func(worker persistentPageWorker) error {
+		var err error
+		pages, err = worker.ListPersistentPages(ctx, request)
 		return err
 	})
 	return pages, err
@@ -217,78 +194,66 @@ func (pool *Pool) ListPages(ctx context.Context, request SessionRequest) ([]Page
 // SwitchPage selects the active persistent page for a named session.
 func (pool *Pool) SwitchPage(ctx context.Context, request PageSelection) (PageInfo, error) {
 	var page PageInfo
-	err := pool.withSessionWorker(ctx, selectionSession(request), false, func(worker Worker) error {
-		persistentWorker, err := requirePersistentPageWorker(worker)
-		if err != nil {
+	err := pool.withPersistentSessionWorker(
+		ctx,
+		selectionSession(request),
+		false,
+		func(worker persistentPageWorker) error {
+			var err error
+			page, err = worker.SwitchPersistentPage(ctx, request)
 			return err
-		}
-		page, err = persistentWorker.SwitchPersistentPage(ctx, request)
-		return err
-	})
+		},
+	)
 	return page, err
 }
 
 // ClosePage closes a persistent page and updates session active-page state.
 func (pool *Pool) ClosePage(ctx context.Context, request PageSelection) error {
 	key := sessionKey(request.ProfileName, request.SessionName)
-	return pool.withSessionWorker(ctx, selectionSession(request), false, func(worker Worker) error {
-		persistentWorker, err := requirePersistentPageWorker(worker)
-		if err != nil {
-			return err
-		}
-		if err := persistentWorker.ClosePersistentPage(ctx, request); err != nil {
-			return err
-		}
-		session, ok := pool.existingSession(key)
-		if !ok {
-			return nil
-		}
-		return pool.removeSessionIfEmpty(ctx, key, session)
-	})
+	return pool.withPersistentSessionWorker(
+		ctx,
+		selectionSession(request),
+		false,
+		func(worker persistentPageWorker) error {
+			if err := worker.ClosePersistentPage(ctx, request); err != nil {
+				return err
+			}
+			session, ok := pool.existingSession(key)
+			if !ok {
+				return nil
+			}
+			return pool.removeSessionIfEmpty(ctx, key, session)
+		},
+	)
 }
 
 // Input types text into a selected or active persistent page element.
 func (pool *Pool) Input(ctx context.Context, request InputRequest) error {
-	return pool.withSessionWorker(ctx, inputSession(request), false, func(worker Worker) error {
-		interactiveWorker, err := requireInteractiveWorker(worker)
-		if err != nil {
-			return err
-		}
-		return interactiveWorker.Input(ctx, request)
+	return pool.withInteractiveSessionWorker(ctx, inputSession(request), func(worker interactiveWorker) error {
+		return worker.Input(ctx, request)
 	})
 }
 
 // Click clicks a selected or active persistent page element.
 func (pool *Pool) Click(ctx context.Context, request InteractionRequest) error {
-	return pool.withSessionWorker(ctx, interactionSession(request), false, func(worker Worker) error {
-		interactiveWorker, err := requireInteractiveWorker(worker)
-		if err != nil {
-			return err
-		}
-		return interactiveWorker.Click(ctx, request)
+	return pool.withInteractiveSessionWorker(ctx, interactionSession(request), func(worker interactiveWorker) error {
+		return worker.Click(ctx, request)
 	})
 }
 
 // Wait waits for a condition on a selected or active persistent page element.
 func (pool *Pool) Wait(ctx context.Context, request WaitRequest) error {
-	return pool.withSessionWorker(ctx, waitSession(request), false, func(worker Worker) error {
-		interactiveWorker, err := requireInteractiveWorker(worker)
-		if err != nil {
-			return err
-		}
-		return interactiveWorker.Wait(ctx, request)
+	return pool.withInteractiveSessionWorker(ctx, waitSession(request), func(worker interactiveWorker) error {
+		return worker.Wait(ctx, request)
 	})
 }
 
 // AccessibilityTree extracts stable accessibility nodes from a persistent page.
 func (pool *Pool) AccessibilityTree(ctx context.Context, request AccessibilityRequest) (AccessibilityTree, error) {
 	var tree AccessibilityTree
-	err := pool.withSessionWorker(ctx, accessibilitySession(request), false, func(worker Worker) error {
-		accessibleWorker, err := requireAccessibleWorker(worker)
-		if err != nil {
-			return err
-		}
-		tree, err = accessibleWorker.AccessibilityTree(ctx, request)
+	err := pool.withAccessibleSessionWorker(ctx, accessibilitySession(request), func(worker accessibleWorker) error {
+		var err error
+		tree, err = worker.AccessibilityTree(ctx, request)
 		return err
 	})
 	return tree, err
@@ -297,12 +262,8 @@ func (pool *Pool) AccessibilityTree(ctx context.Context, request AccessibilityRe
 // Download captures browser-triggered download bytes to caller path.
 func (pool *Pool) Download(ctx context.Context, request DownloadRequest) (CapturedDownload, error) {
 	var result CapturedDownload
-	err := pool.withSessionWorker(ctx, downloadSession(request), false, func(worker Worker) error {
-		downloadWorker, err := requireDownloadWorker(worker)
-		if err != nil {
-			return err
-		}
-		captured, err := downloadWorker.CaptureDownload(ctx, request)
+	err := pool.withDownloadSessionWorker(ctx, downloadSession(request), func(worker downloadWorker) error {
+		captured, err := worker.CaptureDownload(ctx, request)
 		if err != nil {
 			return err
 		}
@@ -321,52 +282,35 @@ func (pool *Pool) Download(ctx context.Context, request DownloadRequest) (Captur
 
 // ResponseMetadata captures bounded network response metadata.
 func (pool *Pool) ResponseMetadata(ctx context.Context, request ResponseMetadataRequest) (ResponseMetadata, error) {
-	releaseDomain, err := pool.domains.acquire(ctx, request.URL)
-	if err != nil {
-		return ResponseMetadata{}, err
-	}
-	defer releaseDomain()
-
-	worker, err := pool.Acquire(ctx)
-	if err != nil {
-		return ResponseMetadata{}, err
-	}
-	defer pool.Release(worker)
-
-	metadataWorker, err := requireMetadataWorker(worker)
-	if err != nil {
-		return ResponseMetadata{}, err
-	}
-	metadata, err := metadataWorker.ResponseMetadata(ctx, request)
-	if err != nil {
-		return ResponseMetadata{}, err
-	}
-	return normalizeResponseMetadata(metadata, request), nil
+	var metadata ResponseMetadata
+	err := pool.withDomainWorker(ctx, request.URL, func(worker Worker) error {
+		metadataWorker, err := requireMetadataWorker(worker)
+		if err != nil {
+			return err
+		}
+		metadata, err = metadataWorker.ResponseMetadata(ctx, request)
+		if err != nil {
+			return err
+		}
+		metadata = normalizeResponseMetadata(metadata, request)
+		return nil
+	})
+	return metadata, err
 }
 
 // PDF captures a rendered page as PDF bytes to caller path.
 func (pool *Pool) PDF(ctx context.Context, request PDFRequest) error {
-	releaseDomain, err := pool.domains.acquire(ctx, request.URL)
-	if err != nil {
-		return err
-	}
-	defer releaseDomain()
-
-	worker, err := pool.Acquire(ctx)
-	if err != nil {
-		return err
-	}
-	defer pool.Release(worker)
-
-	pdfWorker, err := requirePDFWorker(worker)
-	if err != nil {
-		return err
-	}
-	pdf, err := pdfWorker.CapturePDF(ctx, request)
-	if err != nil {
-		return err
-	}
-	return writeBrowserFile(request.Path, pdf, "pdf")
+	return pool.withDomainWorker(ctx, request.URL, func(worker Worker) error {
+		pdfWorker, err := requirePDFWorker(worker)
+		if err != nil {
+			return err
+		}
+		pdf, err := pdfWorker.CapturePDF(ctx, request)
+		if err != nil {
+			return err
+		}
+		return writeBrowserFile(request.Path, pdf, "pdf")
+	})
 }
 
 // DetectManualChallenge reports manual-required CAPTCHA/login state without solving it.
@@ -375,12 +319,9 @@ func (pool *Pool) DetectManualChallenge(
 	request ManualChallengeRequest,
 ) (ManualChallengeResult, error) {
 	var result ManualChallengeResult
-	err := pool.withSessionWorker(ctx, challengeSession(request), false, func(worker Worker) error {
-		challengeWorker, err := requireManualChallengeWorker(worker)
-		if err != nil {
-			return err
-		}
-		result, err = challengeWorker.DetectManualChallenge(ctx, request)
+	err := pool.withManualChallengeSessionWorker(ctx, challengeSession(request), func(worker manualChallengeWorker) error {
+		var err error
+		result, err = worker.DetectManualChallenge(ctx, request)
 		if err != nil {
 			return err
 		}

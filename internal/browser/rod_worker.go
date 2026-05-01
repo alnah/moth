@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"sync"
 	"time"
 
@@ -107,150 +106,68 @@ func validateBrowserBin(path string) error {
 }
 
 func (worker *rodWorker) OpenPage(ctx context.Context, request PageRequest) (LoadedPage, error) {
-	page, err := worker.newOperationPage(ctx, request.URL, request.Headers, request.UserAgent)
-	if err != nil {
-		return LoadedPage{}, err
-	}
-	defer func() { _ = page.Close() }()
-
-	html, err := page.HTML()
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return LoadedPage{}, ctxErr
+	var loadedPage LoadedPage
+	err := worker.withStatelessPage(ctx, request.URL, request.Headers, request.UserAgent, func(page *rod.Page) error {
+		html, err := page.HTML()
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return fmt.Errorf("read rendered html: %w", err)
 		}
-		return LoadedPage{}, fmt.Errorf("read rendered html: %w", err)
-	}
-	return LoadedPage{URL: request.URL, HTML: html}, nil
+		loadedPage = LoadedPage{URL: request.URL, HTML: html}
+		return nil
+	})
+	return loadedPage, err
 }
 
 func (worker *rodWorker) CaptureScreenshot(ctx context.Context, request ScreenshotRequest) ([]byte, error) {
-	page, err := worker.newOperationPage(ctx, request.URL, request.Headers, request.UserAgent)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = page.Close() }()
-
-	image, err := page.Screenshot(request.FullPage, &proto.PageCaptureScreenshot{
-		Format:                proto.PageCaptureScreenshotFormatPng,
-		FromSurface:           true,
-		CaptureBeyondViewport: request.FullPage,
-	})
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+	var image []byte
+	err := worker.withStatelessPage(ctx, request.URL, request.Headers, request.UserAgent, func(page *rod.Page) error {
+		capturedImage, err := page.Screenshot(request.FullPage, &proto.PageCaptureScreenshot{
+			Format:                proto.PageCaptureScreenshotFormatPng,
+			FromSurface:           true,
+			CaptureBeyondViewport: request.FullPage,
+		})
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return fmt.Errorf("capture screenshot: %w", err)
 		}
-		return nil, fmt.Errorf("capture screenshot: %w", err)
-	}
-	return image, nil
+		image = capturedImage
+		return nil
+	})
+	return image, err
 }
 
 func (worker *rodWorker) Close() error {
 	var closeErr error
 	worker.closeOnce.Do(func() {
 		pagesErr := worker.closePersistentPages()
-		if worker.browser != nil {
-			closeErr = closeBrowserWithTimeout(worker.browser)
-			worker.browser = nil
-		}
-		if worker.launcher != nil {
-			worker.launcher.Kill()
-			worker.launcher.Cleanup()
-			worker.launcher = nil
-		}
-		closeErr = errors.Join(pagesErr, closeErr)
+		browserErr := worker.closeBrowserProcess()
+		worker.cleanupLauncherProcess()
+		closeErr = errors.Join(pagesErr, browserErr)
 	})
 	return closeErr
 }
 
-func (worker *rodWorker) newOperationPage(
-	ctx context.Context,
-	pageURL string,
-	headers map[string]string,
-	userAgent string,
-) (*rod.Page, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	page, err := worker.browser.Context(ctx).Page(proto.TargetCreateTarget{URL: "about:blank"})
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		return nil, fmt.Errorf("create page: %w", err)
-	}
-	page = page.Context(ctx)
-
-	if err := worker.configurePage(page, headers, userAgent); err != nil {
-		_ = page.Close()
-		return nil, err
-	}
-	if err := page.Navigate(pageURL); err != nil {
-		_ = page.Close()
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		return nil, fmt.Errorf("navigate page: %w", err)
-	}
-	if err := page.WaitLoad(); err != nil {
-		_ = page.Close()
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		return nil, fmt.Errorf("wait page load: %w", err)
-	}
-	return page, nil
-}
-
-func (worker *rodWorker) configurePage(page *rod.Page, headers map[string]string, userAgent string) error {
-	if userAgent != "" {
-		if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{UserAgent: userAgent}); err != nil {
-			return fmt.Errorf("set user agent: %w", err)
-		}
-	}
-	if urls := blockedURLPatterns(worker.options.BlockedResources); len(urls) > 0 {
-		page.EnableDomain(proto.NetworkEnable{})
-		if err := page.SetBlockedURLs(urls); err != nil {
-			return fmt.Errorf("set blocked urls: %w", err)
-		}
-	}
-	if len(headers) == 0 {
+func (worker *rodWorker) closeBrowserProcess() error {
+	if worker.browser == nil {
 		return nil
 	}
-	cleanup, err := page.SetExtraHeaders(headerPairs(headers))
-	if err != nil {
-		return fmt.Errorf("set headers: %w", err)
-	}
-	_ = cleanup
-	return nil
+	browserErr := closeBrowserWithTimeout(worker.browser)
+	worker.browser = nil
+	return browserErr
 }
 
-func blockedURLPatterns(resources ResourceSet) []string {
-	patterns := []string{}
-	if resources.Has(ResourceImages) {
-		patterns = append(patterns, "*.avif", "*.gif", "*.jpeg", "*.jpg", "*.png", "*.svg", "*.webp")
+func (worker *rodWorker) cleanupLauncherProcess() {
+	if worker.launcher == nil {
+		return
 	}
-	if resources.Has(ResourceFonts) {
-		patterns = append(patterns, "*.otf", "*.ttf", "*.woff", "*.woff2")
-	}
-	if resources.Has(ResourceMedia) {
-		patterns = append(patterns, "*.avi", "*.m4a", "*.mp3", "*.mp4", "*.mpeg", "*.ogg", "*.webm")
-	}
-	return patterns
-}
-
-func headerPairs(headers map[string]string) []string {
-	keys := make([]string, 0, len(headers))
-	for key := range headers {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	pairs := make([]string, 0, len(headers)*2)
-	for _, key := range keys {
-		pairs = append(pairs, key, headers[key])
-	}
-	return pairs
+	worker.launcher.Kill()
+	worker.launcher.Cleanup()
+	worker.launcher = nil
 }
 
 func closeBrowserWithTimeout(browser *rod.Browser) error {
