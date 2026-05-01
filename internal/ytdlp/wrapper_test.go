@@ -3,47 +3,32 @@ package ytdlp
 import (
 	"context"
 	"errors"
-	"reflect"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/alnah/moth/internal/content"
 	"github.com/alnah/moth/internal/tools"
 )
 
-const (
-	ytdlpTestPath = "/test/bin/yt-dlp"
-	ytdlpVideoURL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-)
+const ytdlpVideoURL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 func TestMetadataParsesDumpSingleJSONOutput(t *testing.T) {
-	runner := &fakeYTDLPRunner{
-		results: []tools.Result{
-			{
-				Stdout: []byte(`{
-					"id": "dQw4w9WgXcQ",
-					"title": "Never Gonna Give You Up",
-					"description": "Official music video.",
-					"duration": 213,
-					"webpage_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-					"uploader": "Rick Astley",
-					"upload_date": "20091025",
-					"subtitles": {"en": [{"ext": "vtt", "url": "https://subs.example/en.vtt"}]},
-					"automatic_captions": {"fr": [{"ext": "vtt", "url": "https://subs.example/fr.vtt"}]}
-				}`),
-				ExitCode: 0,
-			},
-		},
-	}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+	client, argsPath := newFakeYTDLPClient(t, "metadata")
 
 	item, err := client.Metadata(context.Background(), MetadataRequest{URL: ytdlpVideoURL})
 	if err != nil {
 		t.Fatalf("Metadata error = %v, want nil", err)
 	}
 
-	assertYTDLPCommand(t, runner.commands[0], []string{"-J", "--skip-download", ytdlpVideoURL})
+	assertYTDLPArgsContain(t, readFakeYTDLPArgs(t, argsPath), "-J", "--skip-download", ytdlpVideoURL)
 	assertYTDLPContentItem(t, item, content.Item{
 		Kind:  content.KindVideo,
 		URL:   "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -60,20 +45,13 @@ func TestMetadataParsesDumpSingleJSONOutput(t *testing.T) {
 	})
 }
 
-func TestDownloadSubtitlesConstructsStableCommand(t *testing.T) {
-	runner := &fakeYTDLPRunner{
-		results: []tools.Result{
-			{
-				Stdout:   []byte("/work/subs/dQw4w9WgXcQ.en.vtt\n/work/subs/dQw4w9WgXcQ.fr.vtt\n"),
-				ExitCode: 0,
-			},
-		},
-	}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+func TestDownloadSubtitlesReturnsPrintedFilesInsideOutputDir(t *testing.T) {
+	client, argsPath := newFakeYTDLPClient(t, "subtitles")
+	outputDir := t.TempDir()
 
 	files, err := client.DownloadSubtitles(context.Background(), SubtitleRequest{
 		URL:              ytdlpVideoURL,
-		OutputDir:        "/work/subs",
+		OutputDir:        outputDir,
 		Languages:        []string{"en", "fr"},
 		Format:           "vtt",
 		IncludeAutomatic: true,
@@ -82,34 +60,29 @@ func TestDownloadSubtitlesConstructsStableCommand(t *testing.T) {
 		t.Fatalf("DownloadSubtitles error = %v, want nil", err)
 	}
 
-	assertYTDLPCommand(t, runner.commands[0], []string{
-		"--skip-download",
-		"--write-subs",
-		"--write-auto-subs",
-		"--sub-langs", "en,fr",
-		"--sub-format", "vtt",
-		"--paths", "/work/subs",
-		"--output", "subtitle:%(id)s.%(language)s.%(ext)s",
-		ytdlpVideoURL,
-	})
-	assertStringSlice(t, files.Paths, []string{"/work/subs/dQw4w9WgXcQ.en.vtt", "/work/subs/dQw4w9WgXcQ.fr.vtt"})
+	args := readFakeYTDLPArgs(t, argsPath)
+	assertYTDLPArgsContain(t, args, "--skip-download", "--write-subs", "--write-auto-subs", ytdlpVideoURL)
+	assertYTDLPFlagValue(t, args, "--sub-langs", "en,fr")
+	assertYTDLPFlagValue(t, args, "--sub-format", "vtt")
+	assertYTDLPFlagValue(t, args, "--paths", outputDir)
+	assertYTDLPFlagValue(t, args, "--output", "subtitle:%(id)s.%(language)s.%(ext)s")
+
+	wantPaths := []string{
+		filepath.Join(outputDir, "dQw4w9WgXcQ.en.vtt"),
+		filepath.Join(outputDir, "dQw4w9WgXcQ.fr.vtt"),
+	}
+	assertStringSlice(t, files.Paths, wantPaths)
+	for _, path := range wantPaths {
+		assertFileExists(t, path)
+	}
 }
 
 func TestDownloadSubtitlesReturnsMissingSubtitleError(t *testing.T) {
-	runner := &fakeYTDLPRunner{
-		results: []tools.Result{
-			{
-				Stderr:   []byte("There are no subtitles for the requested languages"),
-				ExitCode: 1,
-			},
-		},
-		errors: []error{tools.ErrToolFailed},
-	}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+	client, _ := newFakeYTDLPClient(t, "missing-subtitles")
 
 	_, err := client.DownloadSubtitles(context.Background(), SubtitleRequest{
 		URL:       ytdlpVideoURL,
-		OutputDir: "/work/subs",
+		OutputDir: t.TempDir(),
 		Languages: []string{"de"},
 		Format:    "vtt",
 	})
@@ -122,16 +95,12 @@ func TestDownloadSubtitlesReturnsMissingSubtitleError(t *testing.T) {
 }
 
 func TestExtractAudioReturnsPrintedFinalPath(t *testing.T) {
-	runner := &fakeYTDLPRunner{
-		results: []tools.Result{
-			{Stdout: []byte("/work/audio/dQw4w9WgXcQ.mp3\n"), ExitCode: 0},
-		},
-	}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+	client, argsPath := newFakeYTDLPClient(t, "audio")
+	outputDir := t.TempDir()
 
 	file, err := client.ExtractAudio(context.Background(), AudioRequest{
 		URL:       ytdlpVideoURL,
-		OutputDir: "/work/audio",
+		OutputDir: outputDir,
 		Format:    "mp3",
 		Section: TimeRange{
 			Start: 10 * time.Second,
@@ -142,23 +111,22 @@ func TestExtractAudioReturnsPrintedFinalPath(t *testing.T) {
 		t.Fatalf("ExtractAudio error = %v, want nil", err)
 	}
 
-	assertYTDLPCommand(t, runner.commands[0], []string{
-		"--extract-audio",
-		"--audio-format", "mp3",
-		"--download-sections", "*00:00:10-00:01:10",
-		"--paths", "/work/audio",
-		"--output", "%(id)s.%(ext)s",
-		"--print", "after_move:filepath",
-		ytdlpVideoURL,
-	})
-	if file.Path != "/work/audio/dQw4w9WgXcQ.mp3" {
-		t.Fatalf("ExtractAudio path = %q, want printed final path", file.Path)
+	args := readFakeYTDLPArgs(t, argsPath)
+	assertYTDLPArgsContain(t, args, "--extract-audio", "--print", "after_move:filepath", ytdlpVideoURL)
+	assertYTDLPFlagValue(t, args, "--audio-format", "mp3")
+	assertYTDLPFlagValue(t, args, "--download-sections", "*00:00:10-00:01:10")
+	assertYTDLPFlagValue(t, args, "--paths", outputDir)
+	assertYTDLPFlagValue(t, args, "--output", "%(id)s.%(ext)s")
+
+	wantPath := filepath.Join(outputDir, "dQw4w9WgXcQ.mp3")
+	if file.Path != wantPath {
+		t.Fatalf("ExtractAudio path = %q, want printed final path %q", file.Path, wantPath)
 	}
+	assertFileExists(t, wantPath)
 }
 
 func TestMetadataReturnsToolMissing(t *testing.T) {
-	runner := &fakeYTDLPRunner{}
-	client := New(Config{Runner: runner})
+	client := New(Config{})
 
 	_, err := client.Metadata(context.Background(), MetadataRequest{URL: ytdlpVideoURL})
 	if err == nil {
@@ -167,32 +135,25 @@ func TestMetadataReturnsToolMissing(t *testing.T) {
 	if !errors.Is(err, tools.ErrToolMissing) {
 		t.Fatalf("Metadata error = %v, want tool_missing", err)
 	}
-	if len(runner.commands) != 0 {
-		t.Fatalf("runner commands = %#v, want no command when tool is missing", runner.commands)
-	}
 }
 
 func TestMetadataRejectsBadURLBeforeRunningTool(t *testing.T) {
-	runner := &fakeYTDLPRunner{}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+	client, argsPath := newFakeYTDLPClient(t, "metadata")
 
 	_, err := client.Metadata(context.Background(), MetadataRequest{URL: "javascript:alert(1)"})
 	if err == nil {
 		t.Fatal("Metadata bad URL error = nil, want error")
 	}
 	assertYTDLPErrorContains(t, err, "invalid url")
-	if len(runner.commands) != 0 {
-		t.Fatalf("runner commands = %#v, want no command for invalid URL", runner.commands)
-	}
+	assertFakeYTDLPNotRun(t, argsPath)
 }
 
 func TestExtractAudioRejectsInvalidDurationRangeBeforeRunningTool(t *testing.T) {
-	runner := &fakeYTDLPRunner{}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+	client, argsPath := newFakeYTDLPClient(t, "audio")
 
 	_, err := client.ExtractAudio(context.Background(), AudioRequest{
 		URL:       ytdlpVideoURL,
-		OutputDir: "/work/audio",
+		OutputDir: t.TempDir(),
 		Format:    "mp3",
 		Section: TimeRange{
 			Start: 90 * time.Second,
@@ -203,16 +164,11 @@ func TestExtractAudioRejectsInvalidDurationRangeBeforeRunningTool(t *testing.T) 
 		t.Fatal("ExtractAudio invalid duration range error = nil, want error")
 	}
 	assertYTDLPErrorContains(t, err, "duration")
-	if len(runner.commands) != 0 {
-		t.Fatalf("runner commands = %#v, want no command for invalid duration range", runner.commands)
-	}
+	assertFakeYTDLPNotRun(t, argsPath)
 }
 
 func TestMetadataReturnsDecodeErrorForMalformedJSON(t *testing.T) {
-	runner := &fakeYTDLPRunner{
-		results: []tools.Result{{Stdout: []byte(`{"id":`), ExitCode: 0}},
-	}
-	client := New(Config{ToolPath: ytdlpTestPath, Runner: runner})
+	client, _ := newFakeYTDLPClient(t, "bad-metadata-json")
 
 	_, err := client.Metadata(context.Background(), MetadataRequest{URL: ytdlpVideoURL})
 	if err == nil {
@@ -222,57 +178,211 @@ func TestMetadataReturnsDecodeErrorForMalformedJSON(t *testing.T) {
 	assertYTDLPErrorContains(t, err, "decode")
 }
 
-type fakeYTDLPRunner struct {
-	commands []tools.Command
-	results  []tools.Result
-	errors   []error
-}
-
-func (runner *fakeYTDLPRunner) Run(ctx context.Context, command tools.Command) (tools.Result, error) {
-	if err := ctx.Err(); err != nil {
-		return tools.Result{ExitCode: -1}, err
-	}
-
-	runner.commands = append(runner.commands, command)
-	index := len(runner.commands) - 1
-	if index >= len(runner.results) {
-		return tools.Result{ExitCode: 0}, nil
-	}
-	var err error
-	if index < len(runner.errors) {
-		err = runner.errors[index]
-	}
-
-	return runner.results[index], err
-}
-
-func assertYTDLPCommand(t *testing.T, command tools.Command, wantArgs []string) {
+func newFakeYTDLPClient(t *testing.T, scenario string) (*Client, string) {
 	t.Helper()
 
-	if command.Tool != tools.ToolYTDLP {
-		t.Fatalf("command tool = %q, want yt-dlp", command.Tool)
+	argsPath := filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("MOTH_FAKE_YTDLP_ARGS_FILE", argsPath)
+	t.Setenv("MOTH_FAKE_YTDLP_SCENARIO", scenario)
+
+	return New(Config{ToolPath: buildFakeYTDLP(t)}), argsPath
+}
+
+func buildFakeYTDLP(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.go")
+	binaryPath := filepath.Join(dir, executableName("yt-dlp"))
+
+	const source = `package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+const metadataJSON = ` + "`" + `{
+	"id": "dQw4w9WgXcQ",
+	"title": "Never Gonna Give You Up",
+	"description": "Official music video.",
+	"duration": 213,
+	"webpage_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+	"uploader": "Rick Astley",
+	"upload_date": "20091025",
+	"subtitles": {"en": [{"ext": "vtt", "url": "https://subs.example/en.vtt"}]},
+	"automatic_captions": {"fr": [{"ext": "vtt", "url": "https://subs.example/fr.vtt"}]}
+}` + "`" + `
+
+func main() {
+	args := os.Args[1:]
+	if argsPath := os.Getenv("MOTH_FAKE_YTDLP_ARGS_FILE"); argsPath != "" {
+		_ = os.WriteFile(argsPath, []byte(strings.Join(args, "\n")+"\n"), 0o600)
 	}
-	if command.Path != ytdlpTestPath {
-		t.Fatalf("command path = %q, want %q", command.Path, ytdlpTestPath)
+
+	scenario := os.Getenv("MOTH_FAKE_YTDLP_SCENARIO")
+	switch {
+	case scenario == "bad-metadata-json":
+		fmt.Print(` + "`" + `{"id":` + "`" + `)
+	case scenario == "missing-subtitles":
+		fmt.Fprintln(os.Stderr, "There are no subtitles for the requested languages")
+		os.Exit(1)
+	case hasArg(args, "-J"):
+		fmt.Print(metadataJSON)
+	case hasArg(args, "--write-subs"):
+		writeSubtitleOutput(args)
+	case hasArg(args, "--extract-audio"):
+		writeAudioOutput(args)
+	default:
+		fmt.Fprintln(os.Stderr, "unsupported fake yt-dlp args:", strings.Join(args, " "))
+		os.Exit(64)
 	}
-	if !reflect.DeepEqual(command.Args, wantArgs) {
-		t.Fatalf("command args = %#v, want %#v", command.Args, wantArgs)
+}
+
+func writeSubtitleOutput(args []string) {
+	outputDir := flagValue(args, "--paths")
+	if outputDir == "" {
+		outputDir = "."
+	}
+	_ = os.MkdirAll(outputDir, 0o755)
+	paths := []string{
+		filepath.Join(outputDir, "dQw4w9WgXcQ.en.vtt"),
+		filepath.Join(outputDir, "dQw4w9WgXcQ.fr.vtt"),
+	}
+	for _, path := range paths {
+		_ = os.WriteFile(path, []byte("WEBVTT\n"), 0o600)
+		fmt.Println(path)
+	}
+	fmt.Println(filepath.Join(filepath.Dir(outputDir), "outside.vtt"))
+}
+
+func writeAudioOutput(args []string) {
+	outputDir := flagValue(args, "--paths")
+	if outputDir == "" {
+		outputDir = "."
+	}
+	_ = os.MkdirAll(outputDir, 0o755)
+	path := filepath.Join(outputDir, "dQw4w9WgXcQ.mp3")
+	_ = os.WriteFile(path, []byte("fake mp3\n"), 0o600)
+	fmt.Println(filepath.Join(filepath.Dir(outputDir), "outside.mp3"))
+	fmt.Println(path)
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func flagValue(args []string, flag string) string {
+	for i, arg := range args {
+		if arg == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+`
+
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		t.Fatalf("write fake yt-dlp source: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	//nolint:gosec // Test builds a controlled fake yt-dlp executable.
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, sourcePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build fake yt-dlp: %v\n%s", err, output)
+	}
+
+	return binaryPath
+}
+
+func executableName(name string) string {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		return name + ".exe"
+	}
+
+	return name
+}
+
+func readFakeYTDLPArgs(t *testing.T, path string) []string {
+	t.Helper()
+
+	//nolint:gosec // Test reads controlled fake yt-dlp fixture output.
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fake yt-dlp args: %v", err)
+	}
+
+	return strings.Fields(string(contents))
+}
+
+func assertYTDLPArgsContain(t *testing.T, args []string, wantArgs ...string) {
+	t.Helper()
+
+	for _, want := range wantArgs {
+		if !slices.Contains(args, want) {
+			t.Errorf("yt-dlp args = %#v, want arg %q", args, want)
+		}
+	}
+}
+
+func assertYTDLPFlagValue(t *testing.T, args []string, flag string, want string) {
+	t.Helper()
+
+	for index, arg := range args {
+		if arg == flag && index+1 < len(args) {
+			if got := args[index+1]; got != want {
+				t.Fatalf("yt-dlp %s = %q, want %q in args %#v", flag, got, want, args)
+			}
+			return
+		}
+	}
+
+	t.Fatalf("yt-dlp args = %#v, want flag %s=%q", args, flag, want)
+}
+
+func assertFakeYTDLPNotRun(t *testing.T, argsPath string) {
+	t.Helper()
+
+	//nolint:gosec // Test reads controlled fake yt-dlp fixture output.
+	if contents, err := os.ReadFile(argsPath); err == nil {
+		t.Fatalf("fake yt-dlp args = %q, want no run", string(contents))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read fake yt-dlp args: %v", err)
+	}
+}
+
+func assertFileExists(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("file %q stat error = %v, want existing file", path, err)
 	}
 }
 
 func assertYTDLPContentItem(t *testing.T, got content.Item, want content.Item) {
 	t.Helper()
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("content item = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("content item mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func assertStringSlice(t *testing.T, got []string, want []string) {
 	t.Helper()
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("strings = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("strings mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -2,15 +2,21 @@ package youtube
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/alnah/moth/internal/config"
 	"github.com/alnah/moth/internal/content"
+	"github.com/alnah/moth/internal/httpclient"
 )
 
 const youtubeTestAPIKey = "youtube-test-key"
@@ -22,6 +28,17 @@ type youtubeSearchRequest struct {
 	relevanceLanguage string
 	safeSearch        string
 	pageToken         string
+}
+
+type youtubeVideoDurationFixture struct {
+	id       string
+	duration string
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return fn(r)
 }
 
 func TestSearchVideosSendsDocumentedRequestAndMapsVideoItems(t *testing.T) {
@@ -157,6 +174,46 @@ func TestVideoDetailsSendsDocumentedRequestAndMapsDurationChannelDate(t *testing
 	})
 }
 
+func TestVideoDetailsPreservesYouTubeISO8601DurationEdges(t *testing.T) {
+	fixtures := []youtubeVideoDurationFixture{
+		{id: "zeroDuration", duration: "PT0S"},
+		{id: "secondsOnly", duration: "PT15S"},
+		{id: "minutesOnly", duration: "PT2M"},
+		{id: "fullClock", duration: "PT1H2M3S"},
+		{id: "dayClock", duration: "P1DT2H3M4S"},
+	}
+	ids := youtubeVideoDurationFixtureIDs(fixtures)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertYouTubeVideoDetailsRequest(t, r, ids)
+		writeYouTubeVideoDetailsJSON(t, w, fixtures)
+	}))
+	defer server.Close()
+
+	client := newYouTubeTestClient(server.URL)
+
+	result, err := client.VideoDetails(context.Background(), VideoDetailsOptions{IDs: ids})
+	if err != nil {
+		t.Fatalf("VideoDetails error = %v, want nil", err)
+	}
+
+	wantItems := make([]content.Item, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		wantItems = append(wantItems, content.Item{
+			Kind: content.KindVideo,
+			URL:  "https://www.youtube.com/watch?v=" + fixture.id,
+			Metadata: map[string]any{
+				"video_id": fixture.id,
+				"duration": fixture.duration,
+			},
+		})
+	}
+	assertYouTubeContentPack(t, result, content.Pack{
+		Type:     content.TypeContentPack,
+		Items:    wantItems,
+		Metadata: map[string]any{"quota_cost": 1},
+	})
+}
+
 func TestSearchVideosReturnsProviderErrorWithoutLeakingAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertYouTubeSearchRequest(t, r, youtubeSearchRequest{query: "quota", maxResults: "1"})
@@ -176,6 +233,35 @@ func TestSearchVideosReturnsProviderErrorWithoutLeakingAPIKey(t *testing.T) {
 	assertYouTubeErrorContains(t, err, "403")
 	assertYouTubeErrorContains(t, err, "quotaExceeded")
 	assertYouTubeErrorDoesNotContain(t, err, youtubeTestAPIKey)
+}
+
+func TestSearchVideosReturnsTransportErrorWithoutLeakingAPIKey(t *testing.T) {
+	sentinel := errors.New("transport sentinel")
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("dial failed for %s: %w", r.URL.String(), sentinel)
+	})
+	client := NewClient(Config{
+		Settings: config.Settings{YouTubeAPIKey: youtubeTestAPIKey},
+		BaseURL:  "https://youtube.example.test",
+		HTTPClient: httpclient.New(httpclient.Options{
+			HTTPClient: &http.Client{Transport: transport},
+			Attempts:   1,
+		}),
+	})
+
+	_, err := client.SearchVideos(context.Background(), SearchOptions{Query: "transport", MaxResults: 1})
+	if err == nil {
+		t.Fatal("SearchVideos transport error = nil, want error")
+	}
+	assertYouTubeErrorContains(t, err, "youtube")
+	assertYouTubeErrorContains(t, err, "search")
+	assertYouTubeErrorContains(t, err, "request")
+	assertYouTubeErrorContains(t, err, "[redacted]")
+	assertYouTubeErrorDoesNotContain(t, err, youtubeTestAPIKey)
+	assertYouTubeErrorDoesNotContain(t, err, url.QueryEscape(youtubeTestAPIKey))
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("SearchVideos transport error = %v, want errors.Is transport sentinel", err)
+	}
 }
 
 func TestSearchVideosReturnsDecodeErrorForMalformedJSON(t *testing.T) {
@@ -292,11 +378,48 @@ func writeYouTubeJSON(t *testing.T, w http.ResponseWriter, body string) {
 	}
 }
 
+func writeYouTubeVideoDetailsJSON(t *testing.T, w http.ResponseWriter, fixtures []youtubeVideoDurationFixture) {
+	t.Helper()
+
+	items := make([]map[string]any, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		items = append(items, map[string]any{
+			"kind": "youtube#video",
+			"id":   fixture.id,
+			"contentDetails": map[string]any{
+				"duration": fixture.duration,
+			},
+		})
+	}
+	writeYouTubeJSONValue(t, w, map[string]any{
+		"kind":  "youtube#videoListResponse",
+		"items": items,
+	})
+}
+
+func writeYouTubeJSONValue(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("write response: %v", err)
+	}
+}
+
+func youtubeVideoDurationFixtureIDs(fixtures []youtubeVideoDurationFixture) []string {
+	ids := make([]string, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		ids = append(ids, fixture.id)
+	}
+
+	return ids
+}
+
 func assertYouTubeContentPack(t *testing.T, got content.Pack, want content.Pack) {
 	t.Helper()
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("content pack = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("content pack mismatch (-want +got):\n%s", diff)
 	}
 }
 
