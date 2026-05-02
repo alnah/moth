@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/alnah/moth/internal/httpdownload"
+	"github.com/alnah/moth/internal/limits"
 )
 
 type persistentPageWorker interface {
@@ -105,6 +109,41 @@ func writeBrowserFile(path string, data []byte, label string) error {
 		return fmt.Errorf("write %s: %w", label, err)
 	}
 	return nil
+}
+
+func writeBrowserCaptureFile(path string, data []byte, label string, maxBytes int64) error {
+	if err := rejectOversizedCapture(data, label, maxBytes); err != nil {
+		return err
+	}
+	return writeBrowserFile(path, data, label)
+}
+
+func readBrowserCapture(reader io.Reader, label string, maxBytes int64) ([]byte, error) {
+	maxBytes = browserCaptureMaxBytes(maxBytes)
+	data, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectOversizedCapture(data, label, maxBytes); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func rejectOversizedCapture(data []byte, label string, maxBytes int64) error {
+	maxBytes = browserCaptureMaxBytes(maxBytes)
+	size := int64(len(data))
+	if size <= maxBytes {
+		return nil
+	}
+	return fmt.Errorf("%s capture %d bytes over %d bytes: %w", label, size, maxBytes, httpdownload.ErrFileTooLarge)
+}
+
+func browserCaptureMaxBytes(maxBytes int64) int64 {
+	if maxBytes > 0 {
+		return maxBytes
+	}
+	return limits.DefaultMaxBytes
 }
 
 func downloadBytes(value any) ([]byte, error) {

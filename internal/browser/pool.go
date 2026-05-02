@@ -152,7 +152,7 @@ func (pool *Pool) Screenshot(ctx context.Context, request ScreenshotRequest) err
 		if err != nil {
 			return err
 		}
-		return writeBrowserFile(request.Path, image, "screenshot")
+		return writeBrowserCaptureFile(request.Path, image, "screenshot", request.MaxBytes)
 	})
 }
 
@@ -309,7 +309,7 @@ func (pool *Pool) PDF(ctx context.Context, request PDFRequest) error {
 		if err != nil {
 			return err
 		}
-		return writeBrowserFile(request.Path, pdf, "pdf")
+		return writeBrowserCaptureFile(request.Path, pdf, "pdf", request.MaxBytes)
 	})
 }
 

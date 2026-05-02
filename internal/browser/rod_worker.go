@@ -135,6 +135,9 @@ func (worker *rodWorker) CaptureScreenshot(ctx context.Context, request Screensh
 			}
 			return fmt.Errorf("capture screenshot: %w", err)
 		}
+		if err := rejectOversizedCapture(capturedImage, "screenshot", request.MaxBytes); err != nil {
+			return err
+		}
 		image = capturedImage
 		return nil
 	})

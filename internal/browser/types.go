@@ -74,6 +74,7 @@ type ScreenshotRequest struct {
 	URL       string
 	Path      string
 	FullPage  bool
+	MaxBytes  int64
 	Headers   map[string]string
 	UserAgent string
 }
@@ -197,8 +198,9 @@ type ResponseMetadata struct {
 
 // PDFRequest describes a browser PDF capture operation.
 type PDFRequest struct {
-	URL  string
-	Path string
+	URL      string
+	Path     string
+	MaxBytes int64
 }
 
 // ManualChallengeRequest selects a page for manual challenge detection.

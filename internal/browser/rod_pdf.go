@@ -3,7 +3,6 @@ package browser
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
@@ -20,7 +19,7 @@ func (worker *rodWorker) CapturePDF(ctx context.Context, request PDFRequest) ([]
 			return fmt.Errorf("capture pdf: %w", err)
 		}
 		defer func() { _ = reader.Close() }()
-		pdf, err = io.ReadAll(reader)
+		pdf, err = readBrowserCapture(reader, "pdf", request.MaxBytes)
 		if err != nil {
 			return fmt.Errorf("read pdf: %w", err)
 		}
