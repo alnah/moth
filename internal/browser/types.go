@@ -13,6 +13,12 @@ var ErrBrowserMissing = errors.New("browser missing")
 // ErrPoolClosed reports that a browser worker was requested after pool shutdown.
 var ErrPoolClosed = errors.New("browser pool closed")
 
+// ErrBrowserStateUnavailable reports missing or unusable persistent browser state.
+var ErrBrowserStateUnavailable = errors.New("browser state unavailable")
+
+// ErrBrowserStateCorrupt reports unreadable persistent browser state.
+var ErrBrowserStateCorrupt = errors.New("browser state corrupt")
+
 // WorkerFactory creates a browser worker for a pool slot.
 type WorkerFactory func(context.Context) (Worker, error)
 
@@ -78,6 +84,61 @@ type ScreenshotRequest struct {
 	MaxBytes  int64
 	Headers   map[string]string
 	UserAgent string
+}
+
+// StateDirs stores local and global persistent browser state roots.
+type StateDirs struct {
+	Local  string
+	Global string
+}
+
+// StartRequest describes a persistent browser launch request.
+type StartRequest struct {
+	Scope string
+	Show  bool
+}
+
+// StopRequest describes a persistent browser stop request.
+type StopRequest struct {
+	Scope string
+}
+
+// StatusRequest describes a persistent browser status request.
+type StatusRequest struct {
+	Scope string
+}
+
+// ConnectRequest describes an external browser debugger connection request.
+type ConnectRequest struct {
+	Scope    string
+	HostPort string
+}
+
+// BrowserStatus describes persistent browser state for JSON output.
+//
+//nolint:revive // BrowserStatus is the explicit CLI JSON contract name.
+type BrowserStatus struct {
+	Status       string `json:"status"`
+	Scope        string `json:"scope"`
+	DebugURL     string `json:"debug_url,omitempty"`
+	ChromePID    int    `json:"chrome_pid,omitempty"`
+	Owned        bool   `json:"owned"`
+	DataDir      string `json:"data_dir,omitempty"`
+	ActivePageID string `json:"active_page_id,omitempty"`
+}
+
+// LaunchRequest describes an owned persistent Chrome launch.
+type LaunchRequest struct {
+	DataDir    string
+	Show       bool
+	BrowserBin string
+	NoSandbox  bool
+}
+
+// LaunchResult describes an owned persistent Chrome launch result.
+type LaunchResult struct {
+	DebugURL  string
+	ChromePID int
 }
 
 // OpenPageRequest describes a persistent session page open operation.

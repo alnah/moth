@@ -860,54 +860,96 @@ func (fake *fakeToolsDoctor) Doctor(ctx context.Context, options tools.DoctorOpt
 }
 
 type fakeBrowser struct {
-	open       browser.OpenPageRequest
-	pages      browser.SessionRequest
-	page       browser.PageSelection
-	closePage  browser.PageSelection
-	click      browser.InteractionRequest
-	input      browser.InputRequest
-	wait       browser.WaitRequest
-	metadata   browser.ResponseMetadataRequest
-	ax         browser.AccessibilityRequest
-	challenge  browser.ManualChallengeRequest
-	screenshot browser.ScreenshotRequest
-	pdf        browser.PDFRequest
-	download   browser.DownloadRequest
+	start          browser.StartRequest
+	stop           browser.StopRequest
+	status         browser.StatusRequest
+	connect        browser.ConnectRequest
+	open           browser.OpenPageRequest
+	pages          browser.SessionRequest
+	page           browser.PageSelection
+	closePage      browser.PageSelection
+	click          browser.InteractionRequest
+	input          browser.InputRequest
+	wait           browser.WaitRequest
+	metadata       browser.ResponseMetadataRequest
+	ax             browser.AccessibilityRequest
+	challenge      browser.ManualChallengeRequest
+	screenshot     browser.ScreenshotRequest
+	pdf            browser.PDFRequest
+	download       browser.DownloadRequest
+	statusResponse browser.BrowserStatus
+	err            error
+}
+
+func (fake *fakeBrowser) Start(_ context.Context, request browser.StartRequest) (browser.BrowserStatus, error) {
+	fake.start = request
+	return fake.browserStatus(request.Scope), fake.err
+}
+
+func (fake *fakeBrowser) Stop(_ context.Context, request browser.StopRequest) (browser.BrowserStatus, error) {
+	fake.stop = request
+	status := fake.browserStatus(request.Scope)
+	status.Status = "stopped"
+	return status, fake.err
+}
+
+func (fake *fakeBrowser) Status(_ context.Context, request browser.StatusRequest) (browser.BrowserStatus, error) {
+	fake.status = request
+	if fake.statusResponse.Status != "" {
+		return fake.statusResponse, fake.err
+	}
+	return fake.browserStatus(request.Scope), fake.err
+}
+
+func (fake *fakeBrowser) Connect(_ context.Context, request browser.ConnectRequest) (browser.BrowserStatus, error) {
+	fake.connect = request
+	status := fake.browserStatus(request.Scope)
+	status.Owned = false
+	return status, fake.err
 }
 
 func (fake *fakeBrowser) OpenPage(_ context.Context, request browser.OpenPageRequest) (browser.PageInfo, error) {
 	fake.open = request
+	if fake.err != nil {
+		return browser.PageInfo{}, fake.err
+	}
 	return browser.PageInfo{ID: "page-1", URL: request.URL, Active: true}, nil
 }
 
 func (fake *fakeBrowser) ListPages(_ context.Context, request browser.SessionRequest) ([]browser.PageInfo, error) {
 	fake.pages = request
+	if fake.err != nil {
+		return nil, fake.err
+	}
 	return []browser.PageInfo{{ID: "page-1", Active: true}}, nil
 }
 
 func (fake *fakeBrowser) SwitchPage(_ context.Context, request browser.PageSelection) (browser.PageInfo, error) {
 	fake.page = request
+	if fake.err != nil {
+		return browser.PageInfo{}, fake.err
+	}
 	return browser.PageInfo{ID: request.PageID, Active: true}, nil
 }
 
 func (fake *fakeBrowser) ClosePage(_ context.Context, request browser.PageSelection) error {
 	fake.closePage = request
-	return nil
+	return fake.err
 }
 
 func (fake *fakeBrowser) Click(_ context.Context, request browser.InteractionRequest) error {
 	fake.click = request
-	return nil
+	return fake.err
 }
 
 func (fake *fakeBrowser) Input(_ context.Context, request browser.InputRequest) error {
 	fake.input = request
-	return nil
+	return fake.err
 }
 
 func (fake *fakeBrowser) Wait(_ context.Context, request browser.WaitRequest) error {
 	fake.wait = request
-	return nil
+	return fake.err
 }
 
 func (fake *fakeBrowser) ResponseMetadata(
@@ -923,6 +965,9 @@ func (fake *fakeBrowser) AccessibilityTree(
 	request browser.AccessibilityRequest,
 ) (browser.AccessibilityTree, error) {
 	fake.ax = request
+	if fake.err != nil {
+		return browser.AccessibilityTree{}, fake.err
+	}
 	return browser.AccessibilityTree{Nodes: []browser.AccessibilityNode{{Role: "button", Name: "Accept"}}}, nil
 }
 
@@ -931,6 +976,9 @@ func (fake *fakeBrowser) DetectManualChallenge(
 	request browser.ManualChallengeRequest,
 ) (browser.ManualChallengeResult, error) {
 	fake.challenge = request
+	if fake.err != nil {
+		return browser.ManualChallengeResult{}, fake.err
+	}
 	return browser.ManualChallengeResult{
 		ManualRequired: true,
 		Kind:           "captcha",
@@ -953,11 +1001,28 @@ func (fake *fakeBrowser) Download(
 	request browser.DownloadRequest,
 ) (browser.CapturedDownload, error) {
 	fake.download = request
+	if fake.err != nil {
+		return browser.CapturedDownload{}, fake.err
+	}
 	return browser.CapturedDownload{
 		Path:        request.Path,
 		Bytes:       int64(4),
 		ContentType: "application/octet-stream",
 	}, nil
+}
+
+func (fake *fakeBrowser) browserStatus(scope string) browser.BrowserStatus {
+	if scope == "" {
+		scope = "auto"
+	}
+	return browser.BrowserStatus{
+		Status:       "running",
+		Scope:        scope,
+		DebugURL:     "ws://fake-browser",
+		ChromePID:    4242,
+		Owned:        true,
+		ActivePageID: "page-1",
+	}
 }
 
 func samplePack(kind content.Kind) content.Pack {

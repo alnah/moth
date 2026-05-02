@@ -93,6 +93,10 @@ type ToolsService interface {
 
 // BrowserService exposes stable browser capabilities without Rod details.
 type BrowserService interface {
+	Start(context.Context, browser.StartRequest) (browser.BrowserStatus, error)
+	Stop(context.Context, browser.StopRequest) (browser.BrowserStatus, error)
+	Status(context.Context, browser.StatusRequest) (browser.BrowserStatus, error)
+	Connect(context.Context, browser.ConnectRequest) (browser.BrowserStatus, error)
 	OpenPage(context.Context, browser.OpenPageRequest) (browser.PageInfo, error)
 	ListPages(context.Context, browser.SessionRequest) ([]browser.PageInfo, error)
 	SwitchPage(context.Context, browser.PageSelection) (browser.PageInfo, error)
@@ -120,6 +124,10 @@ func defaultDependencies() Dependencies {
 		}
 	}
 	browserPool := browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(browserBin))
+	browserService := browser.NewPersistentService(browser.PersistentServiceOptions{
+		BrowserBin: browserBin,
+		Stateless:  browserPool,
+	})
 
 	return Dependencies{
 		WebSearch:     websearch.NewClient(websearch.Config{Settings: settings}),
@@ -132,7 +140,7 @@ func defaultDependencies() Dependencies {
 		PDF2Text:      pdf2TextAdapter{},
 		Transcription: transcription.NewClient(transcription.Config{Settings: settings}),
 		Tools:         toolsAdapter{},
-		Browser:       browserPool,
+		Browser:       browserService,
 	}
 }
 

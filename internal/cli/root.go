@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/alnah/moth/internal/browser"
 	"github.com/alnah/moth/internal/limits"
 )
 
@@ -191,6 +192,12 @@ func commandErrorFields(err error) (string, string, string) {
 	var commandErr *commandError
 	if errors.As(err, &commandErr) {
 		return commandErr.code, commandErr.message, commandErr.writeContext
+	}
+	if errors.Is(err, browser.ErrBrowserStateUnavailable) {
+		return "browser_state_unavailable", err.Error(), "write browser state error"
+	}
+	if errors.Is(err, browser.ErrBrowserStateCorrupt) {
+		return "browser_state_corrupt", err.Error(), "write browser state error"
 	}
 
 	return "command_failed", err.Error(), "write command error"

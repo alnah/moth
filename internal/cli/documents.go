@@ -8,6 +8,12 @@ import (
 	"github.com/alnah/moth/internal/ytdlp"
 )
 
+type browserStatusDocument struct {
+	Type     string                `json:"type"`
+	Status   browser.BrowserStatus `json:"status"`
+	Warnings []content.Warning     `json:"warnings"`
+}
+
 type browserPageDocument struct {
 	Type     string            `json:"type"`
 	Page     browser.PageInfo  `json:"page"`
@@ -42,6 +48,10 @@ type browserChallengeDocument struct {
 	Type      string                        `json:"type"`
 	Challenge browser.ManualChallengeResult `json:"challenge"`
 	Warnings  []content.Warning             `json:"warnings"`
+}
+
+func browserStatusResult(status browser.BrowserStatus) browserStatusDocument {
+	return browserStatusDocument{Type: "browser_status", Status: status, Warnings: []content.Warning{}}
 }
 
 func browserPageResult(page browser.PageInfo) browserPageDocument {

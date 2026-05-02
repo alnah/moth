@@ -15,9 +15,17 @@ type browserSessionFlags struct {
 	PageID  string
 }
 
+type browserScopeFlags struct {
+	Scope string
+}
+
 func addBrowserCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
 	browserCmd := &cobra.Command{Use: "browser", Short: "Run browser operations"}
 	browserCmd.AddCommand(
+		newBrowserStartCommand(rootOptions, deps),
+		newBrowserStopCommand(rootOptions, deps),
+		newBrowserStatusCommand(rootOptions, deps),
+		newBrowserConnectCommand(rootOptions, deps),
 		newBrowserOpenCommand(rootOptions, deps),
 		newBrowserPagesCommand(rootOptions, deps),
 		newBrowserPageCommand(rootOptions, deps),
@@ -33,6 +41,96 @@ func addBrowserCommand(root *cobra.Command, rootOptions *rootFlags, deps Depende
 		newBrowserChallengeCommand(rootOptions, deps),
 	)
 	root.AddCommand(browserCmd)
+}
+
+func newBrowserStartCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+	flags := browserScopeFlags{Scope: "auto"}
+	show := false
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start a persistent browser",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return newInvalidArgumentsError(errors.New("browser start accepts no positional arguments"))
+			}
+			ctx, cancel := commandContext(cmd, rootOptions)
+			defer cancel()
+			status, err := deps.Browser.Start(ctx, browser.StartRequest{Scope: flags.Scope, Show: show})
+			if err != nil {
+				return fmt.Errorf("browser start: %w", err)
+			}
+			return renderResult(cmd, rootOptions.Output, browserStatusResult(status))
+		},
+	}
+	cmd.Flags().BoolVar(&show, "show", false, "show browser window")
+	addBrowserScopeFlags(cmd, &flags)
+	return cmd
+}
+
+func newBrowserStopCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+	flags := browserScopeFlags{Scope: "auto"}
+	cmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop a persistent browser",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return newInvalidArgumentsError(errors.New("browser stop accepts no positional arguments"))
+			}
+			ctx, cancel := commandContext(cmd, rootOptions)
+			defer cancel()
+			status, err := deps.Browser.Stop(ctx, browser.StopRequest{Scope: flags.Scope})
+			if err != nil {
+				return fmt.Errorf("browser stop: %w", err)
+			}
+			return renderResult(cmd, rootOptions.Output, browserStatusResult(status))
+		},
+	}
+	addBrowserScopeFlags(cmd, &flags)
+	return cmd
+}
+
+func newBrowserStatusCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+	flags := browserScopeFlags{Scope: "auto"}
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show persistent browser status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return newInvalidArgumentsError(errors.New("browser status accepts no positional arguments"))
+			}
+			ctx, cancel := commandContext(cmd, rootOptions)
+			defer cancel()
+			status, err := deps.Browser.Status(ctx, browser.StatusRequest{Scope: flags.Scope})
+			if err != nil {
+				return fmt.Errorf("browser status: %w", err)
+			}
+			return renderResult(cmd, rootOptions.Output, browserStatusResult(status))
+		},
+	}
+	addBrowserScopeFlags(cmd, &flags)
+	return cmd
+}
+
+func newBrowserConnectCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+	flags := browserScopeFlags{Scope: "auto"}
+	cmd := &cobra.Command{
+		Use:   "connect <host:port>",
+		Short: "Connect to an external browser",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return newInvalidArgumentsError(errors.New("browser connect accepts exactly one host:port"))
+			}
+			ctx, cancel := commandContext(cmd, rootOptions)
+			defer cancel()
+			status, err := deps.Browser.Connect(ctx, browser.ConnectRequest{Scope: flags.Scope, HostPort: args[0]})
+			if err != nil {
+				return fmt.Errorf("browser connect: %w", err)
+			}
+			return renderResult(cmd, rootOptions.Output, browserStatusResult(status))
+		},
+	}
+	addBrowserScopeFlags(cmd, &flags)
+	return cmd
 }
 
 func newBrowserOpenCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
@@ -372,6 +470,17 @@ func newBrowserDownloadCommand(rootOptions *rootFlags, deps Dependencies) *cobra
 	}
 	addBrowserPageFlags(cmd, &flags)
 	return cmd
+}
+
+func addBrowserScopeFlags(cmd *cobra.Command, flags *browserScopeFlags) {
+	cmd.Flags().BoolFunc("local", "use local browser state", func(_ string) error {
+		flags.Scope = "local"
+		return nil
+	})
+	cmd.Flags().BoolFunc("global", "use global browser state", func(_ string) error {
+		flags.Scope = "global"
+		return nil
+	})
 }
 
 func addBrowserSessionFlags(cmd *cobra.Command, flags *browserSessionFlags) {
