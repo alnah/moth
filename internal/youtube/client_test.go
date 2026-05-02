@@ -1,6 +1,7 @@
 package youtube
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -115,6 +116,7 @@ func TestSearchVideosSendsDocumentedRequestAndMapsVideoItems(t *testing.T) {
 			"total_results":   2,
 		},
 	})
+	assertYouTubeContentPackJSONWarningsAreArrays(t, result)
 }
 
 func TestVideoDetailsSendsDocumentedRequestAndMapsDurationChannelDate(t *testing.T) {
@@ -172,6 +174,7 @@ func TestVideoDetailsSendsDocumentedRequestAndMapsDurationChannelDate(t *testing
 		},
 		Metadata: map[string]any{"quota_cost": 1},
 	})
+	assertYouTubeContentPackJSONWarningsAreArrays(t, result)
 }
 
 func TestVideoDetailsPreservesYouTubeISO8601DurationEdges(t *testing.T) {
@@ -420,6 +423,36 @@ func assertYouTubeContentPack(t *testing.T, got content.Pack, want content.Pack)
 
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("content pack mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertYouTubeContentPackJSONWarningsAreArrays(t *testing.T, pack content.Pack) {
+	t.Helper()
+
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("marshal content pack: %v", err)
+	}
+	var document struct {
+		Warnings json.RawMessage `json:"warnings"`
+		Items    []struct {
+			Warnings json.RawMessage `json:"warnings"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatalf("decode content pack JSON: %v", err)
+	}
+	assertYouTubeRawJSON(t, document.Warnings, []byte(`[]`), "pack warnings")
+	for _, item := range document.Items {
+		assertYouTubeRawJSON(t, item.Warnings, []byte(`[]`), "item warnings")
+	}
+}
+
+func assertYouTubeRawJSON(t *testing.T, got json.RawMessage, want []byte, label string) {
+	t.Helper()
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s JSON = %s, want %s", label, got, want)
 	}
 }
 

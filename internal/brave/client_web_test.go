@@ -85,6 +85,7 @@ func TestSearchWebSendsDocumentedRequestAndMapsResults(t *testing.T) {
 			"rate_limit_reset":     "1710000000",
 		},
 	})
+	assertContentPackJSONWarningsAreArrays(t, result)
 }
 
 func TestSearchWebDefaultsOffsetToZero(t *testing.T) {

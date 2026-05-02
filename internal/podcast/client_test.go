@@ -1,9 +1,11 @@
 package podcast
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1" //nolint:gosec // Podcast Index contract requires SHA1 signatures.
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +91,7 @@ func TestSearchSendsPodcastIndexAuthHeadersAndMapsPodcasts(t *testing.T) {
 		},
 		Metadata: map[string]any{"total_results": 2},
 	})
+	assertPodcastContentPackJSONWarningsAreArrays(t, pack)
 }
 
 func TestEpisodesByFeedIDSendsDocumentedRequestAndMapsEpisodes(t *testing.T) {
@@ -154,6 +157,7 @@ func TestEpisodesByFeedIDSendsDocumentedRequestAndMapsEpisodes(t *testing.T) {
 		},
 		Metadata: map[string]any{"total_results": 1},
 	})
+	assertPodcastContentPackJSONWarningsAreArrays(t, pack)
 }
 
 func TestSearchReturnsProviderErrorForBadSignatureWithoutLeakingSecrets(t *testing.T) {
@@ -361,6 +365,36 @@ func assertPodcastContentPack(t *testing.T, got content.Pack, want content.Pack)
 
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("content pack mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertPodcastContentPackJSONWarningsAreArrays(t *testing.T, pack content.Pack) {
+	t.Helper()
+
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("marshal content pack: %v", err)
+	}
+	var document struct {
+		Warnings json.RawMessage `json:"warnings"`
+		Items    []struct {
+			Warnings json.RawMessage `json:"warnings"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatalf("decode content pack JSON: %v", err)
+	}
+	assertPodcastRawJSON(t, document.Warnings, []byte(`[]`), "pack warnings")
+	for _, item := range document.Items {
+		assertPodcastRawJSON(t, item.Warnings, []byte(`[]`), "item warnings")
+	}
+}
+
+func assertPodcastRawJSON(t *testing.T, got json.RawMessage, want []byte, label string) {
+	t.Helper()
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s JSON = %s, want %s", label, got, want)
 	}
 }
 

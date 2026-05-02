@@ -70,6 +70,7 @@ func TestSearchImagesSendsDocumentedRequestAndMapsResults(t *testing.T) {
 			},
 		},
 	})
+	assertContentPackJSONWarningsAreArrays(t, result)
 }
 
 func TestSearchImagesOmitsEmptyOptionalMediaMetadata(t *testing.T) {

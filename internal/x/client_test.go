@@ -1,7 +1,9 @@
 package x
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -99,6 +101,7 @@ func TestSearchRecentSendsBearerTokenAndMapsSocialPosts(t *testing.T) {
 	if diff := cmp.Diff(want, pack, cmpopts.EquateEmpty()); diff != "" {
 		t.Fatalf("SearchRecent() mismatch (-want +got):\n%s", diff)
 	}
+	assertXContentPackJSONWarningsAreArrays(t, pack)
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("SearchRecent() requests = %d, want 1; default must not follow pagination or enrich posts", got)
 	}
@@ -183,6 +186,7 @@ func TestLookupPostMapsTextAuthorDateAndPermalink(t *testing.T) {
 	if diff := cmp.Diff(want, pack, cmpopts.EquateEmpty()); diff != "" {
 		t.Fatalf("LookupPost() mismatch (-want +got):\n%s", diff)
 	}
+	assertXContentPackJSONWarningsAreArrays(t, pack)
 }
 
 func TestLookupPostUsesPermalinkFallbackWhenAuthorUsernameMissing(t *testing.T) {
@@ -254,6 +258,7 @@ func TestUserPostsBoundsResultsByLimitAndDoesNotPageByDefault(t *testing.T) {
 	if got := len(pack.Items); got != 2 {
 		t.Fatalf("UserPosts(limit 2) items = %d, want 2", got)
 	}
+	assertXContentPackJSONWarningsAreArrays(t, pack)
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("UserPosts(limit 2) requests = %d, want 1", got)
 	}
@@ -486,6 +491,36 @@ func writeXJSON(t *testing.T, w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := io.WriteString(w, body); err != nil {
 		t.Fatalf("write response: %v", err)
+	}
+}
+
+func assertXContentPackJSONWarningsAreArrays(t *testing.T, pack content.Pack) {
+	t.Helper()
+
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("marshal content pack: %v", err)
+	}
+	var document struct {
+		Warnings json.RawMessage `json:"warnings"`
+		Items    []struct {
+			Warnings json.RawMessage `json:"warnings"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatalf("decode content pack JSON: %v", err)
+	}
+	assertXRawJSON(t, document.Warnings, []byte(`[]`), "pack warnings")
+	for _, item := range document.Items {
+		assertXRawJSON(t, item.Warnings, []byte(`[]`), "item warnings")
+	}
+}
+
+func assertXRawJSON(t *testing.T, got json.RawMessage, want []byte, label string) {
+	t.Helper()
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s JSON = %s, want %s", label, got, want)
 	}
 }
 

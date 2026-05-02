@@ -1,7 +1,9 @@
 package brave
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -86,6 +88,36 @@ func assertContentPack(t *testing.T, got content.Pack, want content.Pack) {
 	assertItems(t, got.Items, want.Items)
 	if !reflect.DeepEqual(got.Metadata, want.Metadata) {
 		t.Fatalf("metadata = %#v, want %#v", got.Metadata, want.Metadata)
+	}
+}
+
+func assertContentPackJSONWarningsAreArrays(t *testing.T, pack content.Pack) {
+	t.Helper()
+
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("marshal content pack: %v", err)
+	}
+	var document struct {
+		Warnings json.RawMessage `json:"warnings"`
+		Items    []struct {
+			Warnings json.RawMessage `json:"warnings"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatalf("decode content pack JSON: %v", err)
+	}
+	assertRawJSON(t, document.Warnings, []byte(`[]`), "pack warnings")
+	for _, item := range document.Items {
+		assertRawJSON(t, item.Warnings, []byte(`[]`), "item warnings")
+	}
+}
+
+func assertRawJSON(t *testing.T, got json.RawMessage, want []byte, label string) {
+	t.Helper()
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s JSON = %s, want %s", label, got, want)
 	}
 }
 
