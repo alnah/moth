@@ -1,5 +1,5 @@
-// Package brave searches Brave web, image, and video endpoints.
-package brave
+// Package websearch searches web, image, and video endpoints through the Brave provider.
+package websearch
 
 import (
 	"cmp"
@@ -24,15 +24,15 @@ const (
 	responseBodyMax  = 4096
 )
 
-// Config contains Brave client dependencies and credentials.
+// Config contains web search client dependencies and credentials.
 type Config struct {
 	Settings   config.Settings
 	BaseURL    string
 	HTTPClient *httpclient.Client
 }
 
-// SearchOptions contains Brave search query parameters.
-type SearchOptions struct {
+// Options contains web search query parameters.
+type Options struct {
 	Query      string
 	Count      int
 	Country    string
@@ -68,7 +68,7 @@ type Client struct {
 	httpClient *httpclient.Client
 }
 
-// NewClient creates a Brave client with defaults for unset dependencies.
+// NewClient creates a web search client with defaults for unset dependencies.
 func NewClient(cfg Config) *Client {
 	baseURL := cmp.Or(strings.TrimRight(cfg.BaseURL, "/"), defaultBaseURL)
 
@@ -84,18 +84,18 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// SearchWeb returns normalized Brave web results.
-func (client *Client) SearchWeb(ctx context.Context, options SearchOptions) (content.Pack, error) {
+// SearchWeb returns normalized web search results.
+func (client *Client) SearchWeb(ctx context.Context, options Options) (content.Pack, error) {
 	return searchBrave(ctx, client, webSearchEndpoint, options, mapWebResponseItems)
 }
 
-// SearchImages returns normalized Brave image results.
-func (client *Client) SearchImages(ctx context.Context, options SearchOptions) (content.Pack, error) {
+// SearchImages returns normalized image search results.
+func (client *Client) SearchImages(ctx context.Context, options Options) (content.Pack, error) {
 	return searchBrave(ctx, client, imagesSearchEndpoint, options, mapImagesResponseItems)
 }
 
-// SearchVideos returns normalized Brave video results.
-func (client *Client) SearchVideos(ctx context.Context, options SearchOptions) (content.Pack, error) {
+// SearchVideos returns normalized video search results.
+func (client *Client) SearchVideos(ctx context.Context, options Options) (content.Pack, error) {
 	return searchBrave(ctx, client, videosSearchEndpoint, options, mapVideosResponseItems)
 }
 
@@ -103,7 +103,7 @@ func searchBrave[T any](
 	ctx context.Context,
 	client *Client,
 	endpoint searchEndpoint,
-	options SearchOptions,
+	options Options,
 	mapResponseItems func(T) []content.Item,
 ) (content.Pack, error) {
 	var response T
@@ -122,7 +122,7 @@ func searchBrave[T any](
 func (client *Client) get(
 	ctx context.Context,
 	endpoint searchEndpoint,
-	options SearchOptions,
+	options Options,
 	target any,
 ) (map[string]any, error) {
 	apiKey := strings.TrimSpace(client.settings.BraveAPIKey)
@@ -155,7 +155,7 @@ func (client *Client) get(
 	return rateLimitMetadata(resp.Header), nil
 }
 
-func (client *Client) requestURL(endpoint searchEndpoint, options SearchOptions) string {
+func (client *Client) requestURL(endpoint searchEndpoint, options Options) string {
 	query := url.Values{}
 	query.Set("q", options.Query)
 	if options.Count > 0 {

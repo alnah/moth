@@ -1,4 +1,4 @@
-package brave
+package websearch
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func TestSearchImagesSendsDocumentedRequestAndMapsResults(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	result, err := client.SearchImages(context.Background(), SearchOptions{
+	result, err := client.SearchImages(context.Background(), Options{
 		Query:      "blue gopher",
 		Count:      3,
 		Country:    "CA",
@@ -97,7 +97,7 @@ func TestSearchImagesOmitsEmptyOptionalMediaMetadata(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	result, err := client.SearchImages(context.Background(), SearchOptions{Query: "minimal image"})
+	result, err := client.SearchImages(context.Background(), Options{Query: "minimal image"})
 	if err != nil {
 		t.Fatalf("SearchImages error = %v, want nil", err)
 	}

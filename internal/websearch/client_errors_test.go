@@ -1,4 +1,4 @@
-package brave
+package websearch
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func TestSearchReturnsContextualProviderErrorForNon2xx(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	_, err := client.SearchWeb(context.Background(), SearchOptions{
+	_, err := client.SearchWeb(context.Background(), Options{
 		Query:      "denied",
 		Count:      1,
 		Country:    "US",
@@ -61,7 +61,7 @@ func TestSearchReturnsContextualDecodeErrorForMalformedJSON(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	_, err := client.SearchImages(context.Background(), SearchOptions{
+	_, err := client.SearchImages(context.Background(), Options{
 		Query:      "bad json",
 		Count:      1,
 		Country:    "US",
@@ -83,7 +83,7 @@ func TestSearchReturnsContextualRequestBuildError(t *testing.T) {
 		BaseURL:  "://bad-base-url",
 	})
 
-	_, err := client.SearchVideos(context.Background(), SearchOptions{Query: "bad base url"})
+	_, err := client.SearchVideos(context.Background(), Options{Query: "bad base url"})
 	if err == nil {
 		t.Fatal("SearchVideos request build error = nil, want error")
 	}
@@ -103,7 +103,7 @@ func TestSearchReturnsContextualTransportError(t *testing.T) {
 		}),
 	})
 
-	_, err := client.SearchWeb(context.Background(), SearchOptions{Query: "network failure"})
+	_, err := client.SearchWeb(context.Background(), Options{Query: "network failure"})
 	if err == nil {
 		t.Fatal("SearchWeb transport error = nil, want error")
 	}

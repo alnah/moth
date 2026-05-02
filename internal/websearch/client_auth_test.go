@@ -1,4 +1,4 @@
-package brave
+package websearch
 
 import (
 	"context"
@@ -24,7 +24,7 @@ func TestSearchFailsBeforeRequestWhenAPIKeyMissing(t *testing.T) {
 		BaseURL:  server.URL,
 	})
 
-	_, err := client.SearchWeb(context.Background(), SearchOptions{Query: "blocked"})
+	_, err := client.SearchWeb(context.Background(), Options{Query: "blocked"})
 	if err == nil {
 		t.Fatal("SearchWeb missing API key error = nil, want error")
 	}
@@ -50,7 +50,7 @@ func TestSearchTrimsAPIKeyBeforeSendingHeader(t *testing.T) {
 		BaseURL:  server.URL,
 	})
 
-	result, err := client.SearchWeb(context.Background(), SearchOptions{Query: "trimmed auth"})
+	result, err := client.SearchWeb(context.Background(), Options{Query: "trimmed auth"})
 	if err != nil {
 		t.Fatalf("SearchWeb error = %v, want nil", err)
 	}

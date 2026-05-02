@@ -1,4 +1,4 @@
-package brave
+package websearch
 
 type braveWebResponse struct {
 	Web struct {

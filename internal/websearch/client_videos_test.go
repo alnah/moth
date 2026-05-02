@@ -1,4 +1,4 @@
-package brave
+package websearch
 
 import (
 	"context"
@@ -38,7 +38,7 @@ func TestSearchVideosSendsDocumentedRequestAndMapsResults(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	result, err := client.SearchVideos(context.Background(), SearchOptions{
+	result, err := client.SearchVideos(context.Background(), Options{
 		Query:      "go conference",
 		Count:      5,
 		Country:    "US",
@@ -92,7 +92,7 @@ func TestSearchVideosOmitsEmptyOptionalMetadata(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	result, err := client.SearchVideos(context.Background(), SearchOptions{Query: "minimal video"})
+	result, err := client.SearchVideos(context.Background(), Options{Query: "minimal video"})
 	if err != nil {
 		t.Fatalf("SearchVideos error = %v, want nil", err)
 	}

@@ -1,4 +1,4 @@
-package brave
+package websearch
 
 import (
 	"context"
@@ -51,7 +51,7 @@ func TestSearchWebSendsDocumentedRequestAndMapsResults(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	result, err := client.SearchWeb(context.Background(), SearchOptions{
+	result, err := client.SearchWeb(context.Background(), Options{
 		Query:      "gopher security",
 		Count:      7,
 		Country:    "FR",
@@ -100,7 +100,7 @@ func TestSearchWebDefaultsOffsetToZero(t *testing.T) {
 
 	client := newBraveTestClient(t, server)
 
-	result, err := client.SearchWeb(context.Background(), SearchOptions{Query: "offset default"})
+	result, err := client.SearchWeb(context.Background(), Options{Query: "offset default"})
 	if err != nil {
 		t.Fatalf("SearchWeb error = %v, want nil", err)
 	}
@@ -157,7 +157,7 @@ func TestSearchUsesRetryingHTTPClient(t *testing.T) {
 		}),
 	})
 
-	result, err := client.SearchWeb(context.Background(), SearchOptions{
+	result, err := client.SearchWeb(context.Background(), Options{
 		Query:      "retryable search",
 		Count:      1,
 		Country:    "US",
