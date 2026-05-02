@@ -21,11 +21,12 @@ type ToolSource string
 
 // Tool resolution sources, ordered by precedence where applicable.
 const (
-	SourceExplicitPath    ToolSource = "explicit_path"
-	SourceEnvPath         ToolSource = "env_path"
-	SourceToolsDir        ToolSource = "tools_dir"
-	SourcePATH            ToolSource = "path"
-	SourceRodManagedCache ToolSource = "rod_managed_cache"
+	SourceExplicitPath      ToolSource = "explicit_path"
+	SourceEnvPath           ToolSource = "env_path"
+	SourceToolsDir          ToolSource = "tools_dir"
+	SourcePATH              ToolSource = "path"
+	SourceRodManagedCache   ToolSource = "rod_managed_cache"
+	SourceCommonInstallPath ToolSource = "common_install_path"
 )
 
 // ToolState is the doctor status for one external dependency.

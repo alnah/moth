@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/alnah/moth/internal/browser"
 	"github.com/alnah/moth/internal/config"
@@ -109,7 +110,16 @@ type BrowserService interface {
 
 func defaultDependencies() Dependencies {
 	settings, _ := config.LoadFromEnv(nil)
-	browserPool := browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(settings.RodBrowserBin))
+	browserBin := settings.RodBrowserBin
+	if browserBin == "" {
+		resolved, err := tools.ResolveBrowser(context.Background(), tools.BrowserDoctorOptions{
+			SearchCommonInstallPaths: true,
+		}, tools.Platform{OS: runtime.GOOS})
+		if err == nil {
+			browserBin = resolved.Path
+		}
+	}
+	browserPool := browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(browserBin))
 
 	return Dependencies{
 		WebSearch:     websearch.NewClient(websearch.Config{Settings: settings}),

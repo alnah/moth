@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -34,6 +35,10 @@ func addToolsCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependenc
 			doctorOptions := tools.DoctorOptions{
 				ToolsDir:                   options.ToolsDir,
 				RequiredTesseractLanguages: []string{"eng", "fra"},
+				Platform:                   tools.Platform{OS: runtime.GOOS},
+				Browser: tools.BrowserDoctorOptions{
+					SearchCommonInstallPaths: true,
+				},
 			}
 			report, err := deps.Tools.Doctor(ctx, doctorOptions)
 			if err != nil {

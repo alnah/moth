@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ const (
 	typeToolDoctor              = "tool_doctor"
 	defaultBrowserLaunchTimeout = 5 * time.Second
 	toolProbeOutputLimitBytes   = 64 * 1024
+	toolVersionLimitBytes       = 256
 )
 
 // BrowserLauncher verifies a resolved browser executable without exposing Rod internals.
@@ -23,9 +25,12 @@ type BrowserLauncher interface {
 
 // BrowserDoctorOptions configures Chromium/browser checks.
 type BrowserDoctorOptions struct {
-	DeepLaunch         bool
-	Launcher           BrowserLauncher
-	ManagedBrowserPath string
+	ExplicitPath             string
+	DeepLaunch               bool
+	Launcher                 BrowserLauncher
+	ManagedBrowserPath       string
+	ExecutableExists         func(string) bool
+	SearchCommonInstallPaths bool
 }
 
 // DoctorOptions configures all external tool checks.
@@ -39,6 +44,7 @@ type DoctorOptions struct {
 
 // Doctor checks required external tools and returns a JSON-ready report.
 func Doctor(ctx context.Context, options DoctorOptions) (DoctorReport, error) {
+	browserDiscoveryPlatform := options.Platform
 	platform := options.Platform
 	if platform.OS == "" {
 		platform.OS = runtime.GOOS
@@ -63,7 +69,7 @@ func Doctor(ctx context.Context, options DoctorOptions) (DoctorReport, error) {
 		report.Tools = append(report.Tools, status)
 	}
 
-	browserStatus := checkBrowser(ctx, options.Browser, platform, runner)
+	browserStatus := checkBrowser(ctx, options.Browser, browserDiscoveryPlatform, platform, runner)
 	report.Tools = append(report.Tools, browserStatus)
 
 	return report, nil
@@ -80,7 +86,7 @@ func requiredToolSpecs() []toolSpec {
 		{name: ToolYTDLP, envVar: "YT_DLP_PATH", versionArgs: []string{"--version"}},
 		{name: ToolFFmpeg, envVar: "FFMPEG_PATH", versionArgs: []string{"--version"}},
 		{name: ToolFFprobe, envVar: "FFPROBE_PATH", versionArgs: []string{"--version"}},
-		{name: ToolPDFToText, envVar: "PDFTOTEXT_PATH", versionArgs: []string{"--version"}},
+		{name: ToolPDFToText, envVar: "PDFTOTEXT_PATH", versionArgs: []string{"-v"}},
 		{name: ToolOCRMyPDF, envVar: "OCRMYPDF_PATH", versionArgs: []string{"--version"}},
 		{name: ToolTesseract, envVar: "TESSERACT_PATH", versionArgs: []string{"--version"}},
 	}
@@ -104,7 +110,22 @@ func checkTool(ctx context.Context, spec toolSpec, toolsDir string, platform Pla
 func detectVersion(ctx context.Context, runner Runner, resolved ResolvedTool, args []string) string {
 	result, _ := runner.Run(ctx, probeCommand(resolved, args))
 	combined := strings.TrimSpace(strings.Join([]string{string(result.Stdout), string(result.Stderr)}, "\n"))
-	return strings.TrimSpace(strings.Split(combined, "\n")[0])
+	return sanitizedVersionLine(strings.Split(combined, "\n")[0])
+}
+
+func sanitizedVersionLine(version string) string {
+	version = strings.TrimSpace(version)
+	for _, entry := range os.Environ() {
+		_, value, ok := strings.Cut(entry, "=")
+		if !ok || len(value) < 8 {
+			continue
+		}
+		version = strings.ReplaceAll(version, value, "[redacted]")
+	}
+	if len(version) > toolVersionLimitBytes {
+		version = version[:toolVersionLimitBytes]
+	}
+	return strings.TrimSpace(version)
 }
 
 func checkTesseractLanguages(

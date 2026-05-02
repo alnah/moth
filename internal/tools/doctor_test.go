@@ -107,7 +107,7 @@ func TestDoctorProbesToolsThroughInjectedRunner(t *testing.T) {
 		{tool: tools.ToolYTDLP, args: []string{"--version"}},
 		{tool: tools.ToolFFmpeg, args: []string{"--version"}},
 		{tool: tools.ToolFFprobe, args: []string{"--version"}},
-		{tool: tools.ToolPDFToText, args: []string{"--version"}},
+		{tool: tools.ToolPDFToText, args: []string{"-v"}},
 		{tool: tools.ToolOCRMyPDF, args: []string{"--version"}},
 		{tool: tools.ToolTesseract, args: []string{"--version"}},
 		{tool: tools.ToolTesseract, args: []string{"--list-langs"}},
