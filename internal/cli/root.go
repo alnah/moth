@@ -37,6 +37,33 @@ type errorDocumentBody struct {
 	Message string `json:"message"`
 }
 
+type commandError struct {
+	cause        error
+	code         string
+	message      string
+	writeContext string
+}
+
+func (err *commandError) Error() string {
+	return err.cause.Error()
+}
+
+func (err *commandError) Unwrap() error {
+	return err.cause
+}
+
+type renderedCommandError struct {
+	cause error
+}
+
+func (err renderedCommandError) Error() string {
+	return err.cause.Error()
+}
+
+func (err renderedCommandError) Unwrap() error {
+	return err.cause
+}
+
 // NewRootCommand builds the testable root CLI without exiting the process.
 func NewRootCommand() *cobra.Command {
 	options := newRootFlags()
@@ -49,7 +76,7 @@ func NewRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return writeUnknownCommandError(cmd, options.Output, args[0])
+				return newUnknownCommandError(args[0])
 			}
 			if err := cmd.Help(); err != nil {
 				return fmt.Errorf("show root help: %w", err)
@@ -59,7 +86,12 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
-		return writeCommandError(cmd, options.Output, "invalid_arguments", err.Error(), err, "write command parse error")
+		return renderCommandError(cmd, options.Output, newCommandError(
+			"invalid_arguments",
+			err.Error(),
+			err,
+			"write command parse error",
+		))
 	})
 
 	flags := cmd.PersistentFlags()
@@ -75,6 +107,7 @@ func NewRootCommand() *cobra.Command {
 	flags.DurationVar(&options.Limits.RetryMax, "retry-max", options.Limits.RetryMax, "maximum retry delay")
 
 	addToolsCommand(cmd, options)
+	renderCommandErrors(cmd, &options.Output)
 
 	return cmd
 }
@@ -85,20 +118,51 @@ func newRootFlags() *rootFlags {
 	}
 }
 
-func writeUnknownCommandError(cmd *cobra.Command, output outputFlags, commandName string) error {
-	commandErr := fmt.Errorf("%w: %s", ErrUnknownCommand, commandName)
-	message := fmt.Sprintf("unknown command: %s", commandName)
-	return writeCommandError(cmd, output, "unknown_command", message, commandErr, "write unknown command error")
+func newUnknownCommandError(commandName string) error {
+	return newCommandError(
+		"unknown_command",
+		fmt.Sprintf("unknown command: %s", commandName),
+		fmt.Errorf("%w: %s", ErrUnknownCommand, commandName),
+		"write unknown command error",
+	)
 }
 
-func writeCommandError(
-	cmd *cobra.Command,
-	output outputFlags,
-	code string,
-	message string,
-	commandErr error,
-	writeContext string,
-) error {
+func newInvalidArgumentsError(cause error) error {
+	return newCommandError("invalid_arguments", cause.Error(), cause, "write command error")
+}
+
+func newCommandError(code string, message string, cause error, writeContext string) error {
+	return &commandError{
+		cause:        cause,
+		code:         code,
+		message:      message,
+		writeContext: writeContext,
+	}
+}
+
+func renderCommandErrors(command *cobra.Command, output *outputFlags) {
+	if command.RunE != nil {
+		run := command.RunE
+		command.RunE = func(cmd *cobra.Command, args []string) error {
+			if err := run(cmd, args); err != nil {
+				return renderCommandError(cmd, *output, err)
+			}
+			return nil
+		}
+	}
+
+	for _, child := range command.Commands() {
+		renderCommandErrors(child, output)
+	}
+}
+
+func renderCommandError(cmd *cobra.Command, output outputFlags, err error) error {
+	var renderedErr renderedCommandError
+	if errors.As(err, &renderedErr) {
+		return err
+	}
+
+	code, message, writeContext := commandErrorFields(err)
 	document := errorDocument{
 		Type: "error",
 		Error: errorDocumentBody{
@@ -107,11 +171,20 @@ func writeCommandError(
 		},
 		Warnings: []string{},
 	}
-	if err := writeJSON(cmd.ErrOrStderr(), output.Pretty, document); err != nil {
-		return fmt.Errorf("%s: %w", writeContext, err)
+	if writeErr := writeJSON(cmd.ErrOrStderr(), output.Pretty, document); writeErr != nil {
+		return fmt.Errorf("%s: %w", writeContext, writeErr)
 	}
 
-	return commandErr
+	return renderedCommandError{cause: err}
+}
+
+func commandErrorFields(err error) (string, string, string) {
+	var commandErr *commandError
+	if errors.As(err, &commandErr) {
+		return commandErr.code, commandErr.message, commandErr.writeContext
+	}
+
+	return "command_failed", err.Error(), "write command error"
 }
 
 func writeJSON(writer io.Writer, pretty bool, value any) error {

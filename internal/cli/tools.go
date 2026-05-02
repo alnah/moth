@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -26,7 +27,7 @@ func addToolsCommand(root *cobra.Command, rootOptions *rootFlags) {
 		Short: "Report external tool status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return fmt.Errorf("tools doctor accepts no positional arguments")
+				return newInvalidArgumentsError(errors.New("tools doctor accepts no positional arguments"))
 			}
 			ctx := cmd.Context()
 			if rootOptions.Limits.Timeout > 0 {

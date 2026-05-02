@@ -128,6 +128,63 @@ func TestRootCommandRejectsJSONFlag(t *testing.T) {
 	}
 }
 
+func TestCommandErrorsEmitSingleStableJSONDocumentByDefault(t *testing.T) {
+	tests := []struct {
+		name            string
+		args            []string
+		wantCode        string
+		wantMessagePart string
+	}{
+		{
+			name:            "root unknown command",
+			args:            []string{"missing-command"},
+			wantCode:        "unknown_command",
+			wantMessagePart: "unknown command: missing-command",
+		},
+		{
+			name:            "root invalid flag",
+			args:            []string{"--json"},
+			wantCode:        "invalid_arguments",
+			wantMessagePart: "unknown flag: --json",
+		},
+		{
+			name:            "subcommand positional argument",
+			args:            []string{"tools", "doctor", "extra"},
+			wantCode:        "invalid_arguments",
+			wantMessagePart: "tools doctor accepts no positional arguments",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := executeRootCommand(tt.args...)
+			if err == nil {
+				t.Fatalf("execute %q error = nil, want command error", strings.Join(tt.args, " "))
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty stdout for command error", stdout)
+			}
+
+			document := decodeSingleJSONErrorDocument(t, stderr)
+			if document.Type != "error" {
+				t.Fatalf("type = %q, want error", document.Type)
+			}
+			if document.Error.Code != tt.wantCode {
+				t.Fatalf("error.code = %q, want %q", document.Error.Code, tt.wantCode)
+			}
+			if !strings.Contains(document.Error.Message, tt.wantMessagePart) {
+				t.Fatalf("error.message = %q, want it to contain %q", document.Error.Message, tt.wantMessagePart)
+			}
+			if document.Warnings == nil {
+				t.Fatal("warnings = nil, want empty array")
+			}
+			if len(document.Warnings) != 0 {
+				t.Fatalf("warnings = %#v, want empty array", document.Warnings)
+			}
+		})
+	}
+}
+
 func TestRootCommandJSONErrorReportsWriteFailure(t *testing.T) {
 	var stdout bytes.Buffer
 	stderr := failingWriter{err: errors.New("disk full")}
@@ -142,6 +199,40 @@ func TestRootCommandJSONErrorReportsWriteFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("error = %v, want writer failure", err)
 	}
+}
+
+type cliErrorJSON struct {
+	Type     string           `json:"type"`
+	Error    cliErrorJSONBody `json:"error"`
+	Warnings []string         `json:"warnings"`
+}
+
+type cliErrorJSONBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func decodeSingleJSONErrorDocument(t *testing.T, payload string) cliErrorJSON {
+	t.Helper()
+
+	if strings.TrimSpace(payload) == "" {
+		t.Fatal("JSON error payload is empty")
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.DisallowUnknownFields()
+
+	var document cliErrorJSON
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode JSON error payload %q: %v", payload, err)
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		t.Fatalf("JSON error payload %q contains extra document", payload)
+	}
+
+	return document
 }
 
 func executeRootCommand(args ...string) (string, string, error) {
