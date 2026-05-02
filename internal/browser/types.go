@@ -59,6 +59,7 @@ func (set ResourceSet) Has(resource Resource) bool {
 // PageRequest describes a rendered page fetch operation.
 type PageRequest struct {
 	URL       string
+	MaxBytes  int64
 	Headers   map[string]string
 	UserAgent string
 }

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -14,7 +13,7 @@ type toolsFlags struct {
 	ToolsDir string
 }
 
-func addToolsCommand(root *cobra.Command, rootOptions *rootFlags) {
+func addToolsCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
 	options := toolsFlags{}
 
 	toolsCmd := &cobra.Command{
@@ -29,22 +28,19 @@ func addToolsCommand(root *cobra.Command, rootOptions *rootFlags) {
 			if len(args) > 0 {
 				return newInvalidArgumentsError(errors.New("tools doctor accepts no positional arguments"))
 			}
-			ctx := cmd.Context()
-			if rootOptions.Limits.Timeout > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, rootOptions.Limits.Timeout)
-				defer cancel()
-			}
+			ctx, cancel := commandContext(cmd, rootOptions)
+			defer cancel()
 
-			report, err := tools.Doctor(ctx, tools.DoctorOptions{
+			doctorOptions := tools.DoctorOptions{
 				ToolsDir:                   options.ToolsDir,
 				RequiredTesseractLanguages: []string{"eng", "fra"},
-			})
+			}
+			report, err := deps.Tools.Doctor(ctx, doctorOptions)
 			if err != nil {
 				return fmt.Errorf("run tools doctor: %w", err)
 			}
 
-			if err := writeJSON(cmd.OutOrStdout(), rootOptions.Output.Pretty, report); err != nil {
+			if err := renderResult(cmd, rootOptions.Output, report); err != nil {
 				return fmt.Errorf("write tools doctor JSON: %w", err)
 			}
 			return nil

@@ -65,7 +65,8 @@ func (err renderedCommandError) Unwrap() error {
 }
 
 // NewRootCommand builds the testable root CLI without exiting the process.
-func NewRootCommand() *cobra.Command {
+func NewRootCommand(deps Dependencies) *cobra.Command {
+	deps = fillDefaultDependencies(deps)
 	options := newRootFlags()
 
 	cmd := &cobra.Command{
@@ -106,7 +107,15 @@ func NewRootCommand() *cobra.Command {
 	flags.DurationVar(&options.Limits.RetryBase, "retry-base", options.Limits.RetryBase, "base retry delay")
 	flags.DurationVar(&options.Limits.RetryMax, "retry-max", options.Limits.RetryMax, "maximum retry delay")
 
-	addToolsCommand(cmd, options)
+	addSearchCommand(cmd, options, deps)
+	addFetchCommand(cmd, options, deps)
+	addBrowserCommand(cmd, options, deps)
+	addYouTubeCommand(cmd, options, deps)
+	addPodcastCommand(cmd, options, deps)
+	addXCommand(cmd, options, deps)
+	addPDF2TextCommand(cmd, options, deps)
+	addTranscribeCommand(cmd, options, deps)
+	addToolsCommand(cmd, options, deps)
 	renderCommandErrors(cmd, &options.Output)
 
 	return cmd

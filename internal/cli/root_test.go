@@ -243,7 +243,7 @@ func executeRootCommand(args ...string) (string, string, error) {
 }
 
 func executeRootCommandWithWriters(args []string, stdout io.Writer, stderr io.Writer) error {
-	cmd := NewRootCommand()
+	cmd := NewRootCommand(defaultTestDependencies())
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
 	cmd.SetArgs(args)

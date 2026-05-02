@@ -2,29 +2,20 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
-func TestMainReturnsForRootHelp(t *testing.T) {
-	originalArgs := os.Args
-	originalStdout := os.Stdout
-	t.Cleanup(func() {
-		os.Args = originalArgs
-		os.Stdout = originalStdout
-	})
-
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+func TestMainStaysThinAndDelegatesToCLIExecute(t *testing.T) {
+	source, err := os.ReadFile("main.go")
 	if err != nil {
-		t.Fatalf("open dev null: %v", err)
+		t.Fatalf("read main.go: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := devNull.Close(); err != nil {
-			t.Fatalf("close dev null: %v", err)
-		}
-	})
-
-	os.Args = []string{"moth"}
-	os.Stdout = devNull
-
-	main()
+	text := string(source)
+	if !strings.Contains(text, "cli.Execute(") {
+		t.Fatalf("main.go must delegate top-level execution to cli.Execute; source:\n%s", text)
+	}
+	if strings.Contains(text, "cli.NewRootCommand(") {
+		t.Fatalf("main.go constructs commands directly, want cli.Execute wrapper; source:\n%s", text)
+	}
 }

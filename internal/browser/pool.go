@@ -131,18 +131,27 @@ func (pool *Pool) Close() error {
 	return errors.Join(errs...)
 }
 
-// FetchPage serializes work by registrable domain and extracts normalized page content.
-func (pool *Pool) FetchPage(ctx context.Context, request PageRequest) (content.Item, error) {
-	var item content.Item
+// FetchRenderedPage serializes work by registrable domain and returns bounded rendered HTML.
+func (pool *Pool) FetchRenderedPage(ctx context.Context, request PageRequest) (LoadedPage, error) {
+	var loadedPage LoadedPage
 	err := pool.withDomainWorker(ctx, request.URL, func(worker Worker) error {
-		loadedPage, err := worker.OpenPage(ctx, request)
+		var err error
+		loadedPage, err = worker.OpenPage(ctx, request)
 		if err != nil {
 			return err
 		}
-		item, err = extractPageItem(loadedPage)
-		return err
+		return rejectOversizedCapture([]byte(loadedPage.HTML), "rendered html", request.MaxBytes)
 	})
-	return item, err
+	return loadedPage, err
+}
+
+// FetchPage serializes work by registrable domain and extracts normalized page content.
+func (pool *Pool) FetchPage(ctx context.Context, request PageRequest) (content.Item, error) {
+	loadedPage, err := pool.FetchRenderedPage(ctx, request)
+	if err != nil {
+		return content.Item{}, err
+	}
+	return extractPageItem(loadedPage)
 }
 
 // Screenshot serializes work by registrable domain and writes a rendered screenshot.
