@@ -20,18 +20,7 @@ func (rodPersistentLauncher) LaunchBrowser(ctx context.Context, request LaunchRe
 	if err := os.MkdirAll(request.DataDir, 0o750); err != nil {
 		return LaunchResult{}, fmt.Errorf("create browser data directory: %w", err)
 	}
-	browserLauncher := launcher.New().
-		Context(ctx).
-		Headless(!request.Show).
-		Leakless(false).
-		UserDataDir(request.DataDir).
-		KeepUserDataDir()
-	if browserBin != "" {
-		browserLauncher = browserLauncher.Bin(browserBin)
-	}
-	if request.NoSandbox || os.Getenv("ROD_NO_SANDBOX") == "1" {
-		browserLauncher = browserLauncher.NoSandbox(true)
-	}
+	browserLauncher := newRodPersistentChromeLauncher(ctx, request, browserBin)
 	controlURL, err := browserLauncher.Launch()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -40,6 +29,21 @@ func (rodPersistentLauncher) LaunchBrowser(ctx context.Context, request LaunchRe
 		return LaunchResult{}, fmt.Errorf("launch browser: %w: %w", ErrBrowserMissing, err)
 	}
 	return LaunchResult{DebugURL: controlURL, ChromePID: browserLauncher.PID()}, nil
+}
+
+func newRodPersistentChromeLauncher(ctx context.Context, request LaunchRequest, browserBin string) *launcher.Launcher {
+	browserLauncher := launcher.New().
+		Context(ctx).
+		Headless(!request.Show).
+		Leakless(false).
+		UserDataDir(request.DataDir)
+	if browserBin != "" {
+		browserLauncher = browserLauncher.Bin(browserBin)
+	}
+	if request.NoSandbox || os.Getenv("ROD_NO_SANDBOX") == "1" {
+		browserLauncher = browserLauncher.NoSandbox(true)
+	}
+	return browserLauncher
 }
 
 type rodPersistentConnector struct{}
