@@ -178,6 +178,91 @@ func TestPersistentServiceReopensStoredBrowserAndPersistsActivePages(t *testing.
 	}
 }
 
+func TestPersistentServiceClosePageUpdatesStoredActivePageAndDownloadsFromActivePage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	stateDirs := newTestStateDirs(t)
+	persistentBrowser := newFakePersistentBrowser()
+	persistentBrowser.pages = []PageInfo{
+		{ID: "page-1", URL: "https://example.test/one"},
+		{ID: "page-2", URL: "https://example.test/two", Active: true},
+	}
+	connector := newFakePersistentConnector(map[string]*fakePersistentBrowser{"ws://owned-browser": persistentBrowser})
+	service := NewPersistentService(PersistentServiceOptions{StateDirs: stateDirs, Connector: connector})
+	writeTestState(t, stateDirs.Local, map[string]any{
+		"debug_url":      "ws://owned-browser",
+		"owned":          true,
+		"active_page_id": "page-2",
+	})
+
+	if err := service.ClosePage(ctx, PageSelection{}); err != nil {
+		t.Fatalf("PersistentService.ClosePage(active) error = %v, want nil", err)
+	}
+	if len(persistentBrowser.pages) != 1 || persistentBrowser.pages[0].ID != "page-1" || !persistentBrowser.pages[0].Active {
+		t.Fatalf("pages after ClosePage(active) = %#v, want page-1 as active", persistentBrowser.pages)
+	}
+	stored := readTestState(t, stateDirs.Local)
+	if stored["active_page_id"] != "page-1" {
+		t.Fatalf("stored active page after ClosePage(active) = %#v, want page-1", stored["active_page_id"])
+	}
+
+	download, err := service.Download(ctx, DownloadRequest{Selector: "#archive", Path: "archive.zip"})
+	if err != nil {
+		t.Fatalf("PersistentService.Download(active) error = %v, want nil", err)
+	}
+	if download.Path != "archive.zip" || download.Bytes != int64(11) || download.ContentType != "application/zip" {
+		t.Fatalf("Download(active) = %#v, want captured archive", download)
+	}
+	wantDownloads := []DownloadRequest{{PageID: "page-1", Selector: "#archive", Path: "archive.zip"}}
+	if !reflect.DeepEqual(persistentBrowser.downloads, wantDownloads) {
+		t.Fatalf("download requests = %#v, want %#v", persistentBrowser.downloads, wantDownloads)
+	}
+}
+
+func TestPersistentServiceDelegatesStatelessOperationsAndReportsUnavailableCapabilities(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	stateless := &fakeStatelessBrowser{
+		metadata: ResponseMetadata{
+			URL:         "https://example.test/file.pdf",
+			Status:      http.StatusOK,
+			ContentType: "application/pdf",
+		},
+	}
+	service := NewPersistentService(PersistentServiceOptions{Stateless: stateless})
+
+	metadata, err := service.ResponseMetadata(ctx, ResponseMetadataRequest{URL: "https://example.test/file.pdf", MaxHeaderBytes: 64})
+	if err != nil {
+		t.Fatalf("PersistentService.ResponseMetadata() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(metadata, stateless.metadata) {
+		t.Fatalf("ResponseMetadata() = %#v, want %#v", metadata, stateless.metadata)
+	}
+	if err := service.Screenshot(ctx, ScreenshotRequest{URL: "https://example.test", Path: "page.png"}); err != nil {
+		t.Fatalf("PersistentService.Screenshot() error = %v, want nil", err)
+	}
+	if err := service.PDF(ctx, PDFRequest{URL: "https://example.test", Path: "page.pdf", MaxBytes: 4096}); err != nil {
+		t.Fatalf("PersistentService.PDF() error = %v, want nil", err)
+	}
+	if stateless.metadataRequest.URL != "https://example.test/file.pdf" || stateless.screenshotRequest.Path != "page.png" ||
+		stateless.pdfRequest.Path != "page.pdf" {
+		t.Fatalf("stateless requests = %#v %#v %#v, want delegated operations", stateless.metadataRequest, stateless.screenshotRequest, stateless.pdfRequest)
+	}
+
+	unavailable := NewPersistentService(PersistentServiceOptions{})
+	if _, err := unavailable.ResponseMetadata(ctx, ResponseMetadataRequest{}); err == nil || !strings.Contains(err.Error(), "metadata unavailable") {
+		t.Fatalf("ResponseMetadata(unavailable) error = %v, want unavailable metadata error", err)
+	}
+	if err := unavailable.Screenshot(ctx, ScreenshotRequest{}); err == nil || !strings.Contains(err.Error(), "screenshot unavailable") {
+		t.Fatalf("Screenshot(unavailable) error = %v, want unavailable screenshot error", err)
+	}
+	if err := unavailable.PDF(ctx, PDFRequest{}); err == nil || !strings.Contains(err.Error(), "pdf unavailable") {
+		t.Fatalf("PDF(unavailable) error = %v, want unavailable pdf error", err)
+	}
+}
+
 func TestDefaultStateDirsUseHomeMothBrowserForGlobalState(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -533,6 +618,7 @@ type fakePersistentBrowser struct {
 	tree      AccessibilityTree
 	challenge ManualChallengeResult
 	actions   []persistentBrowserAction
+	downloads []DownloadRequest
 	closed    bool
 }
 
@@ -640,6 +726,12 @@ func (browser *fakePersistentBrowser) DetectManualChallenge(
 	return browser.challenge, nil
 }
 
+func (browser *fakePersistentBrowser) Download(_ context.Context, request DownloadRequest) (CapturedDownload, error) {
+	request.PageID = browser.selectedPageID(request.PageID)
+	browser.downloads = append(browser.downloads, request)
+	return CapturedDownload{Path: request.Path, Bytes: int64(11), ContentType: "application/zip"}, nil
+}
+
 func (browser *fakePersistentBrowser) Close(context.Context) error {
 	browser.closed = true
 	return nil
@@ -658,4 +750,29 @@ func (browser *fakePersistentBrowser) selectedPageID(pageID string) string {
 		return ""
 	}
 	return browser.pages[0].ID
+}
+
+type fakeStatelessBrowser struct {
+	metadata          ResponseMetadata
+	metadataRequest   ResponseMetadataRequest
+	screenshotRequest ScreenshotRequest
+	pdfRequest        PDFRequest
+}
+
+func (browser *fakeStatelessBrowser) ResponseMetadata(
+	_ context.Context,
+	request ResponseMetadataRequest,
+) (ResponseMetadata, error) {
+	browser.metadataRequest = request
+	return browser.metadata, nil
+}
+
+func (browser *fakeStatelessBrowser) Screenshot(_ context.Context, request ScreenshotRequest) error {
+	browser.screenshotRequest = request
+	return nil
+}
+
+func (browser *fakeStatelessBrowser) PDF(_ context.Context, request PDFRequest) error {
+	browser.pdfRequest = request
+	return nil
 }
