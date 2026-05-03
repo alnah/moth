@@ -115,7 +115,8 @@ type BrowserService interface {
 }
 
 type defaultDependencyOptions struct {
-	Limits limits.Options
+	Limits     limits.Options
+	BrowserBin string
 }
 
 type defaultDependencySet struct {
@@ -137,7 +138,10 @@ func (runtime *defaultDependencyRuntime) fill(deps *Dependencies) {
 		return
 	}
 
-	runtime.set = defaultDependencies(defaultDependencyOptions{Limits: runtime.options.Limits})
+	runtime.set = defaultDependencyFactory(defaultDependencyOptions{
+		Limits:     runtime.options.Limits,
+		BrowserBin: runtime.options.Config.BrowserBin,
+	})
 	if deps.WebSearch == nil {
 		deps.WebSearch = runtime.set.WebSearch
 	}
@@ -180,10 +184,15 @@ func (runtime *defaultDependencyRuntime) closeBrowserPool() error {
 	return runtime.set.browserPool.Close()
 }
 
+var defaultDependencyFactory = defaultDependencies
+
 func defaultDependencies(options defaultDependencyOptions) defaultDependencySet {
 	settings, _ := config.LoadFromEnv(nil)
 	retryingHTTPClient := defaultRetryingHTTPClient(options.Limits)
-	browserBin := settings.RodBrowserBin
+	browserBin := options.BrowserBin
+	if browserBin == "" {
+		browserBin = settings.RodBrowserBin
+	}
 	if browserBin == "" {
 		resolved, err := tools.ResolveBrowser(context.Background(), tools.BrowserDoctorOptions{
 			SearchCommonInstallPaths: true,

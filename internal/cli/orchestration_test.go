@@ -699,27 +699,36 @@ func (harness *commandHarness) execute(args ...string) (string, string, error) {
 }
 
 type fakeWebSearch struct {
-	method  string
-	options websearch.Options
-	err     error
+	method      string
+	options     websearch.Options
+	hadDeadline bool
+	deadline    time.Time
+	err         error
 }
 
-func (fake *fakeWebSearch) SearchWeb(_ context.Context, options websearch.Options) (content.Pack, error) {
+func (fake *fakeWebSearch) SearchWeb(ctx context.Context, options websearch.Options) (content.Pack, error) {
 	fake.method = "web"
 	fake.options = options
+	fake.recordDeadline(ctx)
 	return samplePack(content.KindPage), fake.err
 }
 
-func (fake *fakeWebSearch) SearchImages(_ context.Context, options websearch.Options) (content.Pack, error) {
+func (fake *fakeWebSearch) SearchImages(ctx context.Context, options websearch.Options) (content.Pack, error) {
 	fake.method = "images"
 	fake.options = options
+	fake.recordDeadline(ctx)
 	return samplePack(content.KindImage), fake.err
 }
 
-func (fake *fakeWebSearch) SearchVideos(_ context.Context, options websearch.Options) (content.Pack, error) {
+func (fake *fakeWebSearch) SearchVideos(ctx context.Context, options websearch.Options) (content.Pack, error) {
 	fake.method = "videos"
 	fake.options = options
+	fake.recordDeadline(ctx)
 	return samplePack(content.KindVideo), fake.err
+}
+
+func (fake *fakeWebSearch) recordDeadline(ctx context.Context) {
+	fake.deadline, fake.hadDeadline = ctx.Deadline()
 }
 
 type fakeWebFetch struct{ request webfetch.Request }

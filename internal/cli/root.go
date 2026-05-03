@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alnah/moth/internal/browser"
+	"github.com/alnah/moth/internal/config"
 	"github.com/alnah/moth/internal/limits"
 )
 
@@ -19,7 +20,14 @@ type rootFlags struct {
 	Output     outputFlags
 	Limits     limits.Options
 	ConfigPath string
+	Config     configFlags
 	Verbose    bool
+}
+
+type configFlags struct {
+	BrowserBin string
+	Timeout    bool
+	MaxResults bool
 }
 
 type outputFlags struct {
@@ -76,8 +84,12 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := loadConfigBeforeExecution(cmd, options); err != nil {
+				return renderCommandError(cmd, options.Output, err)
+			}
 			dependencyRuntime.fill(&deps)
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -142,6 +154,63 @@ func newUnknownCommandError(commandName string) error {
 
 func newInvalidArgumentsError(cause error) error {
 	return newCommandError("invalid_arguments", cause.Error(), cause, "write command error")
+}
+
+func newConfigLoadError(path string, cause error) error {
+	return newCommandError(
+		"invalid_arguments",
+		fmt.Sprintf("load config %q: %v", path, cause),
+		cause,
+		"write config error",
+	)
+}
+
+func loadConfigBeforeExecution(cmd *cobra.Command, options *rootFlags) error {
+	if options.ConfigPath == "" {
+		return nil
+	}
+
+	settings, err := config.LoadFile(options.ConfigPath)
+	if err != nil {
+		return newConfigLoadError(options.ConfigPath, err)
+	}
+	applyConfigSettings(cmd.Root(), options, settings)
+	return nil
+}
+
+func applyConfigSettings(root *cobra.Command, options *rootFlags, settings config.FileSettings) {
+	if settings.Presence.BrowserBin {
+		options.Config.BrowserBin = settings.Browser.Bin
+	}
+	if settings.Presence.Limits.Timeout && !persistentFlagChanged(root, "timeout") {
+		options.Limits.Timeout = settings.Limits.Timeout
+		options.Config.Timeout = true
+	}
+	if settings.Presence.Limits.MaxResults && !persistentFlagChanged(root, "max-results") {
+		options.Limits.MaxResults = settings.Limits.MaxResults
+		options.Config.MaxResults = true
+		if root.Annotations == nil {
+			root.Annotations = map[string]string{}
+		}
+		root.Annotations["config.max_results"] = "true"
+	}
+	if settings.Presence.Limits.MaxBytes && !persistentFlagChanged(root, "max-bytes") {
+		options.Limits.MaxBytes = settings.Limits.MaxBytes
+	}
+	if settings.Presence.Limits.Retries && !persistentFlagChanged(root, "retries") {
+		options.Limits.Retries = settings.Limits.Retries
+	}
+	if settings.Presence.Limits.RetryBase && !persistentFlagChanged(root, "retry-base") {
+		options.Limits.RetryBase = settings.Limits.RetryBase
+	}
+	if settings.Presence.Limits.RetryMax && !persistentFlagChanged(root, "retry-max") {
+		options.Limits.RetryMax = settings.Limits.RetryMax
+	}
+}
+
+func persistentFlagChanged(root *cobra.Command, name string) bool {
+	flag := root.PersistentFlags().Lookup(name)
+	return flag != nil && flag.Changed
 }
 
 func newCommandError(code string, message string, cause error, writeContext string) error {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -54,6 +55,17 @@ func changedMaxResults(cmd *cobra.Command, value int) int {
 	flag := cmd.Root().PersistentFlags().Lookup("max-results")
 	if flag != nil && flag.Changed {
 		return value
+	}
+	rootOptions, ok := cmd.Root().Annotations["config.max_results"]
+	if ok && rootOptions == "true" {
+		return value
+	}
+	return 0
+}
+
+func requestTimeout(cmd *cobra.Command, options *rootFlags) time.Duration {
+	if persistentFlagChanged(cmd.Root(), "timeout") || options.Config.Timeout {
+		return options.Limits.Timeout
 	}
 	return 0
 }

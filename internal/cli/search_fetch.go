@@ -130,7 +130,7 @@ func addFetchCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependen
 				UseBrowser:  options.UseBrowser,
 				IncludeText: options.IncludeText,
 				MaxBytes:    rootOptions.Limits.MaxBytes,
-				Timeout:     rootOptions.Limits.Timeout,
+				Timeout:     requestTimeout(cmd, rootOptions),
 			})
 			if err != nil {
 				return fmt.Errorf("fetch URL: %w", err)
