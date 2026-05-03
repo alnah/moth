@@ -13,7 +13,4 @@ type Credentials struct {
 	PodcastIndexAPISecret string
 	XBearerToken          string
 	OpenAIAPIKey          string
-	RedditClientID        string
-	RedditClientSecret    string
-	RedditUserAgent       string
 }

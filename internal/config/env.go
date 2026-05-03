@@ -12,9 +12,6 @@ const (
 	podcastIndexAPISecretEnv = "PODCASTINDEX_API_SECRET" //nolint:gosec // Environment variable name, not credential value.
 	xBearerTokenEnv          = "X_BEARER_TOKEN"          //nolint:gosec // Environment variable name, not credential value.
 	openAIAPIKeyEnv          = "OPENAI_API_KEY"          //nolint:gosec // Environment variable name, not credential value.
-	redditClientIDEnv        = "REDDIT_CLIENT_ID"
-	redditClientSecretEnv    = "REDDIT_CLIENT_SECRET" //nolint:gosec // Environment variable name, not credential value.
-	redditUserAgentEnv       = "REDDIT_USER_AGENT"
 	rodBrowserBinEnv         = "ROD_BROWSER_BIN"
 )
 
@@ -27,9 +24,6 @@ func LoadFromEnv(logger *slog.Logger) (Credentials, EnvironmentSettings, error) 
 		PodcastIndexAPISecret: os.Getenv(podcastIndexAPISecretEnv),
 		XBearerToken:          os.Getenv(xBearerTokenEnv),
 		OpenAIAPIKey:          os.Getenv(openAIAPIKeyEnv),
-		RedditClientID:        os.Getenv(redditClientIDEnv),
-		RedditClientSecret:    os.Getenv(redditClientSecretEnv),
-		RedditUserAgent:       os.Getenv(redditUserAgentEnv),
 	}
 	settings := EnvironmentSettings{
 		RodBrowserBin: os.Getenv(rodBrowserBinEnv),
@@ -49,9 +43,6 @@ func logEnvironmentPresence(logger *slog.Logger, credentials Credentials, settin
 			"podcastindex_api_secret_set", credentials.PodcastIndexAPISecret != "",
 			"x_bearer_token_set", credentials.XBearerToken != "",
 			"openai_api_key_set", credentials.OpenAIAPIKey != "",
-			"reddit_client_id_set", credentials.RedditClientID != "",
-			"reddit_client_secret_set", credentials.RedditClientSecret != "",
-			"reddit_user_agent_set", credentials.RedditUserAgent != "",
 			"rod_browser_bin_set", settings.RodBrowserBin != "",
 		)
 	}

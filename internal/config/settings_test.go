@@ -15,9 +15,6 @@ func TestLoadFromEnvReadsProviderSecretsWithoutLoggingValues(t *testing.T) {
 		"PODCASTINDEX_API_SECRET": "podcast-secret-secret",
 		"X_BEARER_TOKEN":          "x-token-secret",
 		"OPENAI_API_KEY":          "openai-secret",
-		"REDDIT_CLIENT_ID":        "reddit-client-id-secret",
-		"REDDIT_CLIENT_SECRET":    "reddit-client-secret-secret",
-		"REDDIT_USER_AGENT":       "moth-test by u/alnah",
 		"ROD_BROWSER_BIN":         "/tmp/test-chromium",
 	}
 	for name, value := range secrets {
@@ -39,9 +36,6 @@ func TestLoadFromEnvReadsProviderSecretsWithoutLoggingValues(t *testing.T) {
 		"PODCASTINDEX_API_SECRET": credentials.PodcastIndexAPISecret,
 		"X_BEARER_TOKEN":          credentials.XBearerToken,
 		"OPENAI_API_KEY":          credentials.OpenAIAPIKey,
-		"REDDIT_CLIENT_ID":        credentials.RedditClientID,
-		"REDDIT_CLIENT_SECRET":    credentials.RedditClientSecret,
-		"REDDIT_USER_AGENT":       credentials.RedditUserAgent,
 		"ROD_BROWSER_BIN":         settings.RodBrowserBin,
 	}
 	for name, want := range secrets {
@@ -52,7 +46,7 @@ func TestLoadFromEnvReadsProviderSecretsWithoutLoggingValues(t *testing.T) {
 
 	logs := logOutput.String()
 	for name, value := range secrets {
-		if name == "REDDIT_USER_AGENT" || name == "ROD_BROWSER_BIN" {
+		if name == "ROD_BROWSER_BIN" {
 			continue
 		}
 		if strings.Contains(logs, value) {

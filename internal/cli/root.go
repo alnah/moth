@@ -73,11 +73,12 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	dependencyRuntime := newDefaultDependencyRuntime(options)
 
 	cmd := &cobra.Command{
-		Use:           "moth",
-		Short:         "Moth content discovery CLI",
-		Args:          cobra.ArbitraryArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:               "moth",
+		Short:             "Moth content discovery CLI",
+		Args:              cobra.ArbitraryArgs,
+		SilenceUsage:      true,
+		SilenceErrors:     true,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if err := loadConfigBeforeExecution(cmd, options); err != nil {
 				return renderCommandError(cmd, options.Output, err)
