@@ -93,7 +93,7 @@ func newSearchKindCommand(
 
 			count := options.Count
 			if !cmd.Flags().Changed("count") {
-				count = changedMaxResults(cmd, rootOptions.Limits.MaxResults)
+				count = changedMaxResults(cmd, rootOptions)
 			}
 			return run(commandCallContext{Command: cmd, Context: ctx}, websearch.Options{
 				Query:      args[0],
@@ -129,7 +129,7 @@ func addFetchCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependen
 				URL:         args[0],
 				UseBrowser:  options.UseBrowser,
 				IncludeText: options.IncludeText,
-				MaxBytes:    rootOptions.Limits.MaxBytes,
+				MaxBytes:    rootOptions.Runtime.Limits.MaxBytes,
 				Timeout:     requestTimeout(cmd, rootOptions),
 			})
 			if err != nil {

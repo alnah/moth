@@ -26,9 +26,9 @@ const (
 
 // Config contains web search client dependencies and credentials.
 type Config struct {
-	Settings   config.Settings
-	BaseURL    string
-	HTTPClient *httpclient.Client
+	Credentials config.Credentials
+	BaseURL     string
+	HTTPClient  *httpclient.Client
 }
 
 // Options contains web search query parameters.
@@ -63,9 +63,9 @@ var (
 
 // Client sends raw HTTP requests to the Brave Search API.
 type Client struct {
-	settings   config.Settings
-	baseURL    string
-	httpClient *httpclient.Client
+	credentials config.Credentials
+	baseURL     string
+	httpClient  *httpclient.Client
 }
 
 // NewClient creates a web search client with defaults for unset dependencies.
@@ -78,9 +78,9 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		settings:   cfg.Settings,
-		baseURL:    baseURL,
-		httpClient: client,
+		credentials: cfg.Credentials,
+		baseURL:     baseURL,
+		httpClient:  client,
 	}
 }
 
@@ -125,7 +125,7 @@ func (client *Client) get(
 	options Options,
 	target any,
 ) (map[string]any, error) {
-	apiKey := strings.TrimSpace(client.settings.BraveAPIKey)
+	apiKey := strings.TrimSpace(client.credentials.BraveAPIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("brave %s search: api key is required", endpoint.name)
 	}

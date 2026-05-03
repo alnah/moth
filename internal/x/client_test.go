@@ -366,8 +366,8 @@ func TestTooManyRequestsUsesRetryingHTTPClient(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		Settings: config.Settings{XBearerToken: xTestBearerToken},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{XBearerToken: xTestBearerToken},
+		BaseURL:     server.URL,
 		HTTPClient: httpclient.New(httpclient.Options{
 			HTTPClient: &http.Client{Timeout: time.Second},
 			Attempts:   2,
@@ -403,8 +403,8 @@ func TestTransportErrorRedactsBearerTokenAndUnwrapsCause(t *testing.T) {
 	bearerToken := "secret/token value+"
 	cause := errors.New("dial failed with " + bearerToken + " and " + url.QueryEscape(bearerToken))
 	client := NewClient(Config{
-		Settings: config.Settings{XBearerToken: bearerToken},
-		BaseURL:  "https://api.example.test",
+		Credentials: config.Credentials{XBearerToken: bearerToken},
+		BaseURL:     "https://api.example.test",
 		HTTPClient: httpclient.New(httpclient.Options{
 			HTTPClient: &http.Client{Transport: failingRoundTripper{err: cause}},
 			Attempts:   1,
@@ -433,8 +433,8 @@ func TestStatusErrorRedactsBearerTokenFromProviderBody(t *testing.T) {
 	defer server.Close()
 
 	_, err := NewClient(Config{
-		Settings: config.Settings{XBearerToken: bearerToken},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{XBearerToken: bearerToken},
+		BaseURL:     server.URL,
 	}).SearchRecent(context.Background(), SearchOptions{Query: "tier gated"})
 	assertErrorContains(t, err, "access denied")
 	assertErrorContains(t, err, "[redacted]")
@@ -444,8 +444,8 @@ func TestStatusErrorRedactsBearerTokenFromProviderBody(t *testing.T) {
 
 func newXTestClient(server *httptest.Server) *Client {
 	return NewClient(Config{
-		Settings: config.Settings{XBearerToken: xTestBearerToken},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{XBearerToken: xTestBearerToken},
+		BaseURL:     server.URL,
 	})
 }
 

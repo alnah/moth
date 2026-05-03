@@ -146,8 +146,8 @@ func TestSearchUsesRetryingHTTPClient(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		Settings: config.Settings{BraveAPIKey: braveTestAPIKey},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{BraveAPIKey: braveTestAPIKey},
+		BaseURL:     server.URL,
 		HTTPClient: httpclient.New(httpclient.Options{
 			HTTPClient: &http.Client{Transport: server.Client().Transport},
 			Attempts:   2,

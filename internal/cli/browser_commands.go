@@ -412,7 +412,7 @@ func newBrowserScreenshotCommand(rootOptions *rootFlags, deps *Dependencies) *co
 				URL:      args[0],
 				Path:     args[1],
 				FullPage: fullPage,
-				MaxBytes: rootOptions.Limits.MaxBytes,
+				MaxBytes: rootOptions.Runtime.Limits.MaxBytes,
 			}
 			if err := deps.Browser.Screenshot(ctx, request); err != nil {
 				return fmt.Errorf("browser screenshot: %w", err)
@@ -434,7 +434,7 @@ func newBrowserPDFCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Com
 			}
 			ctx, cancel := commandContext(cmd, rootOptions)
 			defer cancel()
-			request := browser.PDFRequest{URL: args[0], Path: args[1], MaxBytes: rootOptions.Limits.MaxBytes}
+			request := browser.PDFRequest{URL: args[0], Path: args[1], MaxBytes: rootOptions.Runtime.Limits.MaxBytes}
 			if err := deps.Browser.PDF(ctx, request); err != nil {
 				return fmt.Errorf("browser pdf: %w", err)
 			}

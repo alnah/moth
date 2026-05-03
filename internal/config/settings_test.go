@@ -27,21 +27,21 @@ func TestLoadFromEnvReadsProviderSecretsWithoutLoggingValues(t *testing.T) {
 	var logOutput bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	settings, err := LoadFromEnv(logger)
+	credentials, settings, err := LoadFromEnv(logger)
 	if err != nil {
 		t.Fatalf("load settings from env: %v", err)
 	}
 
 	got := map[string]string{
-		"BRAVE_API_KEY":           settings.BraveAPIKey,
-		"YOUTUBE_API_KEY":         settings.YouTubeAPIKey,
-		"PODCASTINDEX_API_KEY":    settings.PodcastIndexAPIKey,
-		"PODCASTINDEX_API_SECRET": settings.PodcastIndexAPISecret,
-		"X_BEARER_TOKEN":          settings.XBearerToken,
-		"OPENAI_API_KEY":          settings.OpenAIAPIKey,
-		"REDDIT_CLIENT_ID":        settings.RedditClientID,
-		"REDDIT_CLIENT_SECRET":    settings.RedditClientSecret,
-		"REDDIT_USER_AGENT":       settings.RedditUserAgent,
+		"BRAVE_API_KEY":           credentials.BraveAPIKey,
+		"YOUTUBE_API_KEY":         credentials.YouTubeAPIKey,
+		"PODCASTINDEX_API_KEY":    credentials.PodcastIndexAPIKey,
+		"PODCASTINDEX_API_SECRET": credentials.PodcastIndexAPISecret,
+		"X_BEARER_TOKEN":          credentials.XBearerToken,
+		"OPENAI_API_KEY":          credentials.OpenAIAPIKey,
+		"REDDIT_CLIENT_ID":        credentials.RedditClientID,
+		"REDDIT_CLIENT_SECRET":    credentials.RedditClientSecret,
+		"REDDIT_USER_AGENT":       credentials.RedditUserAgent,
 		"ROD_BROWSER_BIN":         settings.RodBrowserBin,
 	}
 	for name, want := range secrets {

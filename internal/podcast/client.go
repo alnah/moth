@@ -27,11 +27,11 @@ const (
 
 // Config contains Podcast Index client dependencies and credentials.
 type Config struct {
-	Settings   config.Settings
-	BaseURL    string
-	HTTPClient *httpclient.Client
-	UserAgent  string
-	Now        func() time.Time
+	Credentials config.Credentials
+	BaseURL     string
+	HTTPClient  *httpclient.Client
+	UserAgent   string
+	Now         func() time.Time
 }
 
 // SearchOptions contains Podcast Index /search/byterm query parameters.
@@ -52,11 +52,11 @@ type EpisodesByFeedIDOptions struct {
 
 // Client sends raw HTTP requests to Podcast Index.
 type Client struct {
-	settings   config.Settings
-	baseURL    string
-	httpClient *httpclient.Client
-	userAgent  string
-	now        func() time.Time
+	credentials config.Credentials
+	baseURL     string
+	httpClient  *httpclient.Client
+	userAgent   string
+	now         func() time.Time
 }
 
 // NewClient creates a Podcast Index client with defaults for unset dependencies.
@@ -79,11 +79,11 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		settings:   cfg.Settings,
-		baseURL:    baseURL,
-		httpClient: httpClient,
-		userAgent:  userAgent,
-		now:        now,
+		credentials: cfg.Credentials,
+		baseURL:     baseURL,
+		httpClient:  httpClient,
+		userAgent:   userAgent,
+		now:         now,
 	}
 }
 
@@ -140,8 +140,8 @@ func (client *Client) EpisodesByFeedID(ctx context.Context, options EpisodesByFe
 }
 
 func (client *Client) get(ctx context.Context, path string, query url.Values, target any) error {
-	apiKey := strings.TrimSpace(client.settings.PodcastIndexAPIKey)
-	apiSecret := strings.TrimSpace(client.settings.PodcastIndexAPISecret)
+	apiKey := strings.TrimSpace(client.credentials.PodcastIndexAPIKey)
+	apiSecret := strings.TrimSpace(client.credentials.PodcastIndexAPISecret)
 	if apiKey == "" {
 		return fmt.Errorf("podcast index: api key is required")
 	}

@@ -139,8 +139,8 @@ func (runtime *defaultDependencyRuntime) fill(deps *Dependencies) {
 	}
 
 	runtime.set = defaultDependencyFactory(defaultDependencyOptions{
-		Limits:     runtime.options.Limits,
-		BrowserBin: runtime.options.Config.BrowserBin,
+		Limits:     runtime.options.Runtime.Limits,
+		BrowserBin: runtime.options.Runtime.BrowserBin,
 	})
 	if deps.WebSearch == nil {
 		deps.WebSearch = runtime.set.WebSearch
@@ -187,11 +187,11 @@ func (runtime *defaultDependencyRuntime) closeBrowserPool() error {
 var defaultDependencyFactory = defaultDependencies
 
 func defaultDependencies(options defaultDependencyOptions) defaultDependencySet {
-	settings, _ := config.LoadFromEnv(nil)
+	credentials, environmentSettings, _ := config.LoadFromEnv(nil)
 	retryingHTTPClient := defaultRetryingHTTPClient(options.Limits)
 	browserBin := options.BrowserBin
 	if browserBin == "" {
-		browserBin = settings.RodBrowserBin
+		browserBin = environmentSettings.RodBrowserBin
 	}
 	if browserBin == "" {
 		resolved, err := tools.ResolveBrowser(context.Background(), tools.BrowserDoctorOptions{
@@ -210,28 +210,28 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 	return defaultDependencySet{
 		Dependencies: Dependencies{
 			WebSearch: websearch.NewClient(websearch.Config{
-				Settings:   settings,
-				HTTPClient: retryingHTTPClient,
+				Credentials: credentials,
+				HTTPClient:  retryingHTTPClient,
 			}),
 			WebFetch: webfetch.New(webfetch.Options{BrowserFetcher: poolBrowserFetcher{pool: browserPool}}),
 			YouTube: youtube.NewClient(youtube.Config{
-				Settings:   settings,
-				HTTPClient: retryingHTTPClient,
+				Credentials: credentials,
+				HTTPClient:  retryingHTTPClient,
 			}),
 			YTDLP: ytdlp.New(ytdlp.Config{}),
 			Podcast: podcast.NewClient(podcast.Config{
-				Settings:   settings,
-				HTTPClient: retryingHTTPClient,
+				Credentials: credentials,
+				HTTPClient:  retryingHTTPClient,
 			}),
 			PodcastAudio: podcast.NewAudioDownloader(podcast.AudioDownloaderConfig{}),
 			X: xclient.NewClient(xclient.Config{
-				Settings:   settings,
-				HTTPClient: retryingHTTPClient,
+				Credentials: credentials,
+				HTTPClient:  retryingHTTPClient,
 			}),
 			PDF2Text: pdf2TextAdapter{},
 			Transcription: transcription.NewClient(transcription.Config{
-				Settings:   settings,
-				HTTPClient: retryingHTTPClient,
+				Credentials: credentials,
+				HTTPClient:  retryingHTTPClient,
 			}),
 			Tools:   toolsAdapter{},
 			Browser: browserService,

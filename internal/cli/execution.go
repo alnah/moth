@@ -45,27 +45,22 @@ func renderResult(cmd *cobra.Command, output outputFlags, value any) error {
 
 func commandContext(cmd *cobra.Command, options *rootFlags) (context.Context, context.CancelFunc) {
 	ctx := cmd.Context()
-	if options.Limits.Timeout <= 0 {
+	if options.Runtime.Limits.Timeout <= 0 {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(ctx, options.Limits.Timeout)
+	return context.WithTimeout(ctx, options.Runtime.Limits.Timeout)
 }
 
-func changedMaxResults(cmd *cobra.Command, value int) int {
-	flag := cmd.Root().PersistentFlags().Lookup("max-results")
-	if flag != nil && flag.Changed {
-		return value
-	}
-	rootOptions, ok := cmd.Root().Annotations["config.max_results"]
-	if ok && rootOptions == "true" {
-		return value
+func changedMaxResults(cmd *cobra.Command, options *rootFlags) int {
+	if persistentFlagChanged(cmd.Root(), "max-results") || options.AppliedConfig.MaxResults {
+		return options.Runtime.Limits.MaxResults
 	}
 	return 0
 }
 
 func requestTimeout(cmd *cobra.Command, options *rootFlags) time.Duration {
-	if persistentFlagChanged(cmd.Root(), "timeout") || options.Config.Timeout {
-		return options.Limits.Timeout
+	if persistentFlagChanged(cmd.Root(), "timeout") || options.AppliedConfig.Timeout {
+		return options.Runtime.Limits.Timeout
 	}
 	return 0
 }

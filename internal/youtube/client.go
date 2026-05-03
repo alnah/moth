@@ -30,9 +30,9 @@ var (
 
 // Config contains YouTube API dependencies and credentials.
 type Config struct {
-	Settings   config.Settings
-	BaseURL    string
-	HTTPClient *httpclient.Client
+	Credentials config.Credentials
+	BaseURL     string
+	HTTPClient  *httpclient.Client
 }
 
 // SearchOptions contains YouTube search.list query parameters.
@@ -52,9 +52,9 @@ type VideoDetailsOptions struct {
 
 // Client sends raw HTTP requests to the YouTube Data API.
 type Client struct {
-	settings   config.Settings
-	baseURL    string
-	httpClient *httpclient.Client
+	credentials config.Credentials
+	baseURL     string
+	httpClient  *httpclient.Client
 }
 
 type redactedYouTubeError struct {
@@ -78,9 +78,9 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		settings:   cfg.Settings,
-		baseURL:    cmp.Or(strings.TrimRight(cfg.BaseURL, "/"), defaultBaseURL),
-		httpClient: client,
+		credentials: cfg.Credentials,
+		baseURL:     cmp.Or(strings.TrimRight(cfg.BaseURL, "/"), defaultBaseURL),
+		httpClient:  client,
 	}
 }
 
@@ -121,7 +121,7 @@ func (client *Client) VideoDetails(ctx context.Context, options VideoDetailsOpti
 }
 
 func (client *Client) get(ctx context.Context, path string, query url.Values, operation string, target any) error {
-	apiKey := strings.TrimSpace(client.settings.YouTubeAPIKey)
+	apiKey := strings.TrimSpace(client.credentials.YouTubeAPIKey)
 	if apiKey == "" {
 		return fmt.Errorf("youtube %s: api key is required", operation)
 	}

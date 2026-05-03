@@ -36,7 +36,7 @@ func addYouTubeCommand(root *cobra.Command, rootOptions *rootFlags, deps *Depend
 			defer cancel()
 			pack, err := deps.YouTube.SearchVideos(ctx, youtube.SearchOptions{
 				Query:             args[0],
-				MaxResults:        changedMaxResults(cmd, rootOptions.Limits.MaxResults),
+				MaxResults:        changedMaxResults(cmd, rootOptions),
 				RegionCode:        searchOptions.Region,
 				RelevanceLanguage: searchOptions.Lang,
 				SafeSearch:        searchOptions.Safe,
@@ -152,7 +152,7 @@ func addPodcastCommand(root *cobra.Command, rootOptions *rootFlags, deps *Depend
 			defer cancel()
 			pack, err := deps.Podcast.Search(ctx, podcast.SearchOptions{
 				Query:      args[0],
-				MaxResults: changedMaxResults(cmd, rootOptions.Limits.MaxResults),
+				MaxResults: changedMaxResults(cmd, rootOptions),
 				Clean:      podcastSearchOptions.Clean,
 				FullText:   podcastSearchOptions.FullText,
 			})
@@ -181,7 +181,7 @@ func addPodcastCommand(root *cobra.Command, rootOptions *rootFlags, deps *Depend
 			defer cancel()
 			pack, err := deps.Podcast.EpisodesByFeedID(ctx, podcast.EpisodesByFeedIDOptions{
 				FeedID:     feedID,
-				MaxResults: changedMaxResults(cmd, rootOptions.Limits.MaxResults),
+				MaxResults: changedMaxResults(cmd, rootOptions),
 				FullText:   episodeOptions.FullText,
 			})
 			if err != nil {
@@ -206,7 +206,7 @@ func addPodcastCommand(root *cobra.Command, rootOptions *rootFlags, deps *Depend
 				FeedURL:             args[0],
 				EpisodeGUID:         args[1],
 				AllowedContentTypes: audioOptions.ContentTypes,
-				MaxBytes:            rootOptions.Limits.MaxBytes,
+				MaxBytes:            rootOptions.Runtime.Limits.MaxBytes,
 			})
 			if err != nil {
 				return fmt.Errorf("podcast audio: %w", err)
@@ -238,7 +238,7 @@ func addXCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies
 			defer cancel()
 			pack, err := deps.X.SearchRecent(ctx, x.SearchOptions{
 				Query:       args[0],
-				MaxResults:  changedMaxResults(cmd, rootOptions.Limits.MaxResults),
+				MaxResults:  changedMaxResults(cmd, rootOptions),
 				MaxRequests: searchOptions.MaxRequests,
 				NextToken:   searchOptions.NextToken,
 			})
@@ -283,7 +283,7 @@ func addXCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies
 			defer cancel()
 			pack, err := deps.X.UserPosts(ctx, x.UserPostsOptions{
 				UserID:      args[0],
-				MaxResults:  changedMaxResults(cmd, rootOptions.Limits.MaxResults),
+				MaxResults:  changedMaxResults(cmd, rootOptions),
 				MaxRequests: userOptions.MaxRequests,
 				NextToken:   userOptions.NextToken,
 			})
@@ -319,7 +319,7 @@ func addPDF2TextCommand(root *cobra.Command, rootOptions *rootFlags, deps *Depen
 			item, err := deps.PDF2Text.Extract(ctx, args[0], pdf2txt.Options{
 				OCRAllowed:   ocrAllowed,
 				OCRLanguage:  options.OCRLanguage,
-				MaxTextBytes: rootOptions.Limits.MaxBytes,
+				MaxTextBytes: rootOptions.Runtime.Limits.MaxBytes,
 			})
 			if err != nil {
 				return fmt.Errorf("pdf2txt: %w", err)

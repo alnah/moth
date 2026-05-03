@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -9,26 +10,29 @@ import (
 	"github.com/alnah/moth/internal/limits"
 )
 
-// FileSettings contains non-secret settings loaded from an explicit JSON config file.
-type FileSettings struct {
-	Browser  FileBrowserOptions   `json:"browser"`
-	Limits   limits.Options       `json:"limits"`
-	Presence FileSettingsPresence `json:"-"`
+// ErrUnsupportedConfigField reports a config field outside the file schema.
+var ErrUnsupportedConfigField = errors.New("unsupported config field")
+
+// FileConfig contains non-secret settings loaded from an explicit JSON config file.
+type FileConfig struct {
+	Browser  BrowserConfig      `json:"browser"`
+	Limits   limits.Options     `json:"limits"`
+	Presence FileConfigPresence `json:"-"`
 }
 
-// FileBrowserOptions contains browser settings from the config file.
-type FileBrowserOptions struct {
+// BrowserConfig contains browser settings from the config file.
+type BrowserConfig struct {
 	Bin string `json:"bin"`
 }
 
-// FileSettingsPresence reports fields explicitly present in the config file.
-type FileSettingsPresence struct {
+// FileConfigPresence reports fields explicitly present in the config file.
+type FileConfigPresence struct {
 	BrowserBin bool
-	Limits     FileLimitsPresence
+	Limits     LimitsConfigPresence
 }
 
-// FileLimitsPresence reports limit fields explicitly present in the config file.
-type FileLimitsPresence struct {
+// LimitsConfigPresence reports limit fields explicitly present in the config file.
+type LimitsConfigPresence struct {
 	Timeout    bool
 	MaxResults bool
 	MaxBytes   bool
@@ -38,79 +42,79 @@ type FileLimitsPresence struct {
 }
 
 // LoadFile loads non-secret settings from an explicit JSON config file path.
-func LoadFile(path string) (FileSettings, error) {
+func LoadFile(path string) (FileConfig, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // Config path is an explicit user argument.
 	if err != nil {
-		return FileSettings{}, fmt.Errorf("read config file %q: %w", path, err)
+		return FileConfig{}, fmt.Errorf("read config file %q: %w", path, err)
 	}
 
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return FileSettings{}, fmt.Errorf("parse JSON config: %w", err)
+		return FileConfig{}, fmt.Errorf("parse JSON config: %w", err)
 	}
 	if raw == nil {
-		return FileSettings{}, fmt.Errorf("parse JSON config: root must be an object")
+		return FileConfig{}, fmt.Errorf("parse JSON config: root must be an object")
 	}
 
 	if err := rejectUnsupportedConfigFields(raw, map[string]struct{}{"browser": {}, "limits": {}}, ""); err != nil {
-		return FileSettings{}, err
+		return FileConfig{}, err
 	}
 
-	var settings FileSettings
+	var fileConfig FileConfig
 	if data, ok := raw["browser"]; ok {
 		browser, present, err := parseFileBrowserOptions(data)
 		if err != nil {
-			return FileSettings{}, err
+			return FileConfig{}, err
 		}
-		settings.Browser = browser
-		settings.Presence.BrowserBin = present.BrowserBin
+		fileConfig.Browser = browser
+		fileConfig.Presence.BrowserBin = present.BrowserBin
 	}
 	if data, ok := raw["limits"]; ok {
 		limitOptions, present, err := parseFileLimits(data)
 		if err != nil {
-			return FileSettings{}, err
+			return FileConfig{}, err
 		}
-		settings.Limits = limitOptions
-		settings.Presence.Limits = present
+		fileConfig.Limits = limitOptions
+		fileConfig.Presence.Limits = present
 	}
 
-	return settings, nil
+	return fileConfig, nil
 }
 
-func parseFileBrowserOptions(data json.RawMessage) (FileBrowserOptions, FileSettingsPresence, error) {
+func parseFileBrowserOptions(data json.RawMessage) (BrowserConfig, FileConfigPresence, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return FileBrowserOptions{}, FileSettingsPresence{}, fmt.Errorf("parse JSON config browser: %w", err)
+		return BrowserConfig{}, FileConfigPresence{}, fmt.Errorf("parse JSON config browser: %w", err)
 	}
 	if raw == nil {
-		return FileBrowserOptions{}, FileSettingsPresence{}, fmt.Errorf("parse JSON config browser: must be an object")
+		return BrowserConfig{}, FileConfigPresence{}, fmt.Errorf("parse JSON config browser: must be an object")
 	}
 	if err := rejectUnsupportedConfigFields(raw, map[string]struct{}{"bin": {}}, "browser"); err != nil {
-		return FileBrowserOptions{}, FileSettingsPresence{}, err
+		return BrowserConfig{}, FileConfigPresence{}, err
 	}
 
-	var browser FileBrowserOptions
-	var present FileSettingsPresence
+	var browser BrowserConfig
+	var present FileConfigPresence
 	if data, ok := raw["bin"]; ok {
 		present.BrowserBin = true
 		if err := json.Unmarshal(data, &browser.Bin); err != nil {
-			return FileBrowserOptions{}, FileSettingsPresence{}, fmt.Errorf("parse JSON config browser.bin: %w", err)
+			return BrowserConfig{}, FileConfigPresence{}, fmt.Errorf("parse JSON config browser.bin: %w", err)
 		}
 		if browser.Bin == "" {
-			return FileBrowserOptions{}, FileSettingsPresence{}, fmt.Errorf("validate config browser.bin: must not be empty")
+			return BrowserConfig{}, FileConfigPresence{}, fmt.Errorf("validate config browser.bin: must not be empty")
 		}
 	}
 
 	return browser, present, nil
 }
 
-func parseFileLimits(data json.RawMessage) (limits.Options, FileLimitsPresence, error) {
+func parseFileLimits(data json.RawMessage) (limits.Options, LimitsConfigPresence, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return limits.Options{}, FileLimitsPresence{}, fmt.Errorf("parse JSON config limits: %w", err)
+		return limits.Options{}, LimitsConfigPresence{}, fmt.Errorf("parse JSON config limits: %w", err)
 	}
 	if raw == nil {
-		return limits.Options{}, FileLimitsPresence{}, fmt.Errorf("parse JSON config limits: must be an object")
+		return limits.Options{}, LimitsConfigPresence{}, fmt.Errorf("parse JSON config limits: must be an object")
 	}
 	allowed := map[string]struct{}{
 		"timeout":     {},
@@ -121,20 +125,20 @@ func parseFileLimits(data json.RawMessage) (limits.Options, FileLimitsPresence, 
 		"retry_max":   {},
 	}
 	if err := rejectUnsupportedConfigFields(raw, allowed, "limits"); err != nil {
-		return limits.Options{}, FileLimitsPresence{}, err
+		return limits.Options{}, LimitsConfigPresence{}, err
 	}
 
 	return parseFileLimitValues(raw)
 }
 
-func parseFileLimitValues(raw map[string]json.RawMessage) (limits.Options, FileLimitsPresence, error) {
+func parseFileLimitValues(raw map[string]json.RawMessage) (limits.Options, LimitsConfigPresence, error) {
 	var options limits.Options
-	var present FileLimitsPresence
+	var present LimitsConfigPresence
 	if err := parseDurationLimitValues(raw, &options, &present); err != nil {
-		return limits.Options{}, FileLimitsPresence{}, err
+		return limits.Options{}, LimitsConfigPresence{}, err
 	}
 	if err := parseNumericLimitValues(raw, &options, &present); err != nil {
-		return limits.Options{}, FileLimitsPresence{}, err
+		return limits.Options{}, LimitsConfigPresence{}, err
 	}
 	return options, present, nil
 }
@@ -142,7 +146,7 @@ func parseFileLimitValues(raw map[string]json.RawMessage) (limits.Options, FileL
 func parseDurationLimitValues(
 	raw map[string]json.RawMessage,
 	options *limits.Options,
-	present *FileLimitsPresence,
+	present *LimitsConfigPresence,
 ) error {
 	var err error
 	if data, ok := raw["timeout"]; ok {
@@ -172,7 +176,7 @@ func parseDurationLimitValues(
 func parseNumericLimitValues(
 	raw map[string]json.RawMessage,
 	options *limits.Options,
-	present *FileLimitsPresence,
+	present *LimitsConfigPresence,
 ) error {
 	var err error
 	if data, ok := raw["max_results"]; ok {
@@ -204,7 +208,7 @@ func rejectUnsupportedConfigFields(raw map[string]json.RawMessage, allowed map[s
 		if _, ok := allowed[field]; ok {
 			continue
 		}
-		return fmt.Errorf("unsupported config field %q", qualifiedConfigField(prefix, field))
+		return fmt.Errorf("%w %q", ErrUnsupportedConfigField, qualifiedConfigField(prefix, field))
 	}
 	return nil
 }

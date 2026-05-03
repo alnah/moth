@@ -18,9 +18,9 @@ const (
 	rodBrowserBinEnv         = "ROD_BROWSER_BIN"
 )
 
-// LoadFromEnv reads settings from environment variables and logs only presence flags.
-func LoadFromEnv(logger *slog.Logger) (Settings, error) {
-	settings := Settings{
+// LoadFromEnv reads environment variables and logs only presence flags.
+func LoadFromEnv(logger *slog.Logger) (Credentials, EnvironmentSettings, error) {
+	credentials := Credentials{
 		BraveAPIKey:           os.Getenv(braveAPIKeyEnv),
 		YouTubeAPIKey:         os.Getenv(youTubeAPIKeyEnv),
 		PodcastIndexAPIKey:    os.Getenv(podcastIndexAPIKeyEnv),
@@ -30,26 +30,28 @@ func LoadFromEnv(logger *slog.Logger) (Settings, error) {
 		RedditClientID:        os.Getenv(redditClientIDEnv),
 		RedditClientSecret:    os.Getenv(redditClientSecretEnv),
 		RedditUserAgent:       os.Getenv(redditUserAgentEnv),
-		RodBrowserBin:         os.Getenv(rodBrowserBinEnv),
+	}
+	settings := EnvironmentSettings{
+		RodBrowserBin: os.Getenv(rodBrowserBinEnv),
 	}
 
-	logSettingsPresence(logger, settings)
+	logEnvironmentPresence(logger, credentials, settings)
 
-	return settings, nil
+	return credentials, settings, nil
 }
 
-func logSettingsPresence(logger *slog.Logger, settings Settings) {
+func logEnvironmentPresence(logger *slog.Logger, credentials Credentials, settings EnvironmentSettings) {
 	if logger != nil {
 		logger.Debug("loaded settings from environment",
-			"brave_api_key_set", settings.BraveAPIKey != "",
-			"youtube_api_key_set", settings.YouTubeAPIKey != "",
-			"podcastindex_api_key_set", settings.PodcastIndexAPIKey != "",
-			"podcastindex_api_secret_set", settings.PodcastIndexAPISecret != "",
-			"x_bearer_token_set", settings.XBearerToken != "",
-			"openai_api_key_set", settings.OpenAIAPIKey != "",
-			"reddit_client_id_set", settings.RedditClientID != "",
-			"reddit_client_secret_set", settings.RedditClientSecret != "",
-			"reddit_user_agent_set", settings.RedditUserAgent != "",
+			"brave_api_key_set", credentials.BraveAPIKey != "",
+			"youtube_api_key_set", credentials.YouTubeAPIKey != "",
+			"podcastindex_api_key_set", credentials.PodcastIndexAPIKey != "",
+			"podcastindex_api_secret_set", credentials.PodcastIndexAPISecret != "",
+			"x_bearer_token_set", credentials.XBearerToken != "",
+			"openai_api_key_set", credentials.OpenAIAPIKey != "",
+			"reddit_client_id_set", credentials.RedditClientID != "",
+			"reddit_client_secret_set", credentials.RedditClientSecret != "",
+			"reddit_user_agent_set", credentials.RedditUserAgent != "",
 			"rod_browser_bin_set", settings.RodBrowserBin != "",
 		)
 	}

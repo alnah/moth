@@ -15,7 +15,7 @@ import (
 
 // Config contains OpenAI transcription client dependencies and credentials.
 type Config struct {
-	Settings    config.Settings
+	Credentials config.Credentials
 	BaseURL     string
 	HTTPClient  *httpclient.Client
 	FFprobePath string
@@ -77,7 +77,7 @@ type ChunkPlanOptions struct {
 
 // Client sends raw HTTP requests to the OpenAI transcription endpoint.
 type Client struct {
-	settings    config.Settings
+	credentials config.Credentials
 	baseURL     string
 	httpClient  *httpclient.Client
 	ffprobePath string
@@ -109,7 +109,7 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		settings:    cfg.Settings,
+		credentials: cfg.Credentials,
 		baseURL:     baseURL,
 		httpClient:  httpClient,
 		ffprobePath: ffprobePath,
@@ -120,7 +120,7 @@ func NewClient(cfg Config) *Client {
 
 // Transcribe uploads one file or bounded chunks and returns merged transcript output.
 func (client *Client) Transcribe(ctx context.Context, request Request) (Result, error) {
-	apiKey := strings.TrimSpace(client.settings.OpenAIAPIKey)
+	apiKey := strings.TrimSpace(client.credentials.OpenAIAPIKey)
 	if apiKey == "" {
 		return Result{}, fmt.Errorf("openai transcription: api key is required")
 	}

@@ -1,7 +1,12 @@
 package config
 
-// Settings contains optional credentials and paths loaded from the environment.
-type Settings struct {
+// EnvironmentSettings contains non-secret settings loaded from environment variables.
+type EnvironmentSettings struct {
+	RodBrowserBin string
+}
+
+// Credentials contains provider credentials loaded from environment variables only.
+type Credentials struct {
 	BraveAPIKey           string
 	YouTubeAPIKey         string
 	PodcastIndexAPIKey    string
@@ -11,5 +16,4 @@ type Settings struct {
 	RedditClientID        string
 	RedditClientSecret    string
 	RedditUserAgent       string
-	RodBrowserBin         string
 }

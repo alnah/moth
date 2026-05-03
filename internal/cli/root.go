@@ -17,17 +17,11 @@ import (
 var ErrUnknownCommand = errors.New("unknown command")
 
 type rootFlags struct {
-	Output     outputFlags
-	Limits     limits.Options
-	ConfigPath string
-	Config     configFlags
-	Verbose    bool
-}
-
-type configFlags struct {
-	BrowserBin string
-	Timeout    bool
-	MaxResults bool
+	Output        outputFlags
+	Runtime       config.RuntimeConfig
+	ConfigPath    string
+	AppliedConfig config.FieldSet
+	Verbose       bool
 }
 
 type outputFlags struct {
@@ -112,16 +106,17 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	})
 
 	flags := cmd.PersistentFlags()
+	limitOptions := &options.Runtime.Limits
 	flags.BoolVar(&options.Output.Pretty, "pretty", false, "pretty-print JSON output")
-	flags.DurationVar(&options.Limits.Timeout, "timeout", options.Limits.Timeout, "command timeout")
-	flags.IntVar(&options.Limits.MaxResults, "max-results", options.Limits.MaxResults, "maximum result count")
-	flags.Int64Var(&options.Limits.MaxBytes, "max-bytes", options.Limits.MaxBytes, "maximum downloaded bytes")
+	flags.DurationVar(&limitOptions.Timeout, "timeout", limitOptions.Timeout, "command timeout")
+	flags.IntVar(&limitOptions.MaxResults, "max-results", limitOptions.MaxResults, "maximum result count")
+	flags.Int64Var(&limitOptions.MaxBytes, "max-bytes", limitOptions.MaxBytes, "maximum downloaded bytes")
 	flags.StringVar(&options.Output.OutputPath, "output", "", "output path")
 	flags.StringVar(&options.ConfigPath, "config", "", "config path")
 	flags.BoolVar(&options.Verbose, "verbose", false, "enable verbose logs")
-	flags.IntVar(&options.Limits.Retries, "retries", options.Limits.Retries, "retry count")
-	flags.DurationVar(&options.Limits.RetryBase, "retry-base", options.Limits.RetryBase, "base retry delay")
-	flags.DurationVar(&options.Limits.RetryMax, "retry-max", options.Limits.RetryMax, "maximum retry delay")
+	flags.IntVar(&limitOptions.Retries, "retries", limitOptions.Retries, "retry count")
+	flags.DurationVar(&limitOptions.RetryBase, "retry-base", limitOptions.RetryBase, "base retry delay")
+	flags.DurationVar(&limitOptions.RetryMax, "retry-max", limitOptions.RetryMax, "maximum retry delay")
 
 	addSearchCommand(cmd, options, &deps)
 	addFetchCommand(cmd, options, &deps)
@@ -139,7 +134,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 
 func newRootFlags() *rootFlags {
 	return &rootFlags{
-		Limits: limits.DefaultOptions(),
+		Runtime: config.RuntimeConfig{Limits: limits.DefaultOptions()},
 	}
 }
 
@@ -170,41 +165,28 @@ func loadConfigBeforeExecution(cmd *cobra.Command, options *rootFlags) error {
 		return nil
 	}
 
-	settings, err := config.LoadFile(options.ConfigPath)
+	fileConfig, err := config.LoadFile(options.ConfigPath)
 	if err != nil {
 		return newConfigLoadError(options.ConfigPath, err)
 	}
-	applyConfigSettings(cmd.Root(), options, settings)
+	applyConfigSettings(cmd.Root(), options, fileConfig)
 	return nil
 }
 
-func applyConfigSettings(root *cobra.Command, options *rootFlags, settings config.FileSettings) {
-	if settings.Presence.BrowserBin {
-		options.Config.BrowserBin = settings.Browser.Bin
-	}
-	if settings.Presence.Limits.Timeout && !persistentFlagChanged(root, "timeout") {
-		options.Limits.Timeout = settings.Limits.Timeout
-		options.Config.Timeout = true
-	}
-	if settings.Presence.Limits.MaxResults && !persistentFlagChanged(root, "max-results") {
-		options.Limits.MaxResults = settings.Limits.MaxResults
-		options.Config.MaxResults = true
-		if root.Annotations == nil {
-			root.Annotations = map[string]string{}
-		}
-		root.Annotations["config.max_results"] = "true"
-	}
-	if settings.Presence.Limits.MaxBytes && !persistentFlagChanged(root, "max-bytes") {
-		options.Limits.MaxBytes = settings.Limits.MaxBytes
-	}
-	if settings.Presence.Limits.Retries && !persistentFlagChanged(root, "retries") {
-		options.Limits.Retries = settings.Limits.Retries
-	}
-	if settings.Presence.Limits.RetryBase && !persistentFlagChanged(root, "retry-base") {
-		options.Limits.RetryBase = settings.Limits.RetryBase
-	}
-	if settings.Presence.Limits.RetryMax && !persistentFlagChanged(root, "retry-max") {
-		options.Limits.RetryMax = settings.Limits.RetryMax
+func applyConfigSettings(root *cobra.Command, options *rootFlags, fileConfig config.FileConfig) {
+	merged, applied := config.MergeFileConfig(options.Runtime, fileConfig, changedPersistentConfigFields(root))
+	options.Runtime = merged
+	options.AppliedConfig = applied
+}
+
+func changedPersistentConfigFields(root *cobra.Command) config.FieldSet {
+	return config.FieldSet{
+		Timeout:    persistentFlagChanged(root, "timeout"),
+		MaxResults: persistentFlagChanged(root, "max-results"),
+		MaxBytes:   persistentFlagChanged(root, "max-bytes"),
+		Retries:    persistentFlagChanged(root, "retries"),
+		RetryBase:  persistentFlagChanged(root, "retry-base"),
+		RetryMax:   persistentFlagChanged(root, "retry-max"),
 	}
 }
 

@@ -18,7 +18,7 @@ func (client *Client) get(
 	query url.Values,
 	target any,
 ) (map[string]any, error) {
-	bearerToken := strings.TrimSpace(client.settings.XBearerToken)
+	bearerToken := strings.TrimSpace(client.credentials.XBearerToken)
 	if bearerToken == "" {
 		return nil, fmt.Errorf("x %s: not configured: bearer token is required", operation)
 	}

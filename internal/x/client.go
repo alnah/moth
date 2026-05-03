@@ -19,9 +19,9 @@ const (
 
 // Config contains X API dependencies and credentials.
 type Config struct {
-	Settings   config.Settings
-	BaseURL    string
-	HTTPClient *httpclient.Client
+	Credentials config.Credentials
+	BaseURL     string
+	HTTPClient  *httpclient.Client
 }
 
 // SearchOptions contains X recent search query parameters and request guards.
@@ -47,9 +47,9 @@ type UserPostsOptions struct {
 
 // Client sends read-only raw HTTP requests to the X API.
 type Client struct {
-	settings   config.Settings
-	baseURL    string
-	httpClient *httpclient.Client
+	credentials config.Credentials
+	baseURL     string
+	httpClient  *httpclient.Client
 }
 
 // NewClient creates an X client with defaults for unset dependencies.
@@ -60,9 +60,9 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		settings:   cfg.Settings,
-		baseURL:    cmp.Or(strings.TrimRight(cfg.BaseURL, "/"), defaultBaseURL),
-		httpClient: client,
+		credentials: cfg.Credentials,
+		baseURL:     cmp.Or(strings.TrimRight(cfg.BaseURL, "/"), defaultBaseURL),
+		httpClient:  client,
 	}
 }
 

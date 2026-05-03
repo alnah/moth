@@ -79,8 +79,8 @@ func TestSearchReturnsContextualDecodeErrorForMalformedJSON(t *testing.T) {
 
 func TestSearchReturnsContextualRequestBuildError(t *testing.T) {
 	client := NewClient(Config{
-		Settings: config.Settings{BraveAPIKey: braveTestAPIKey},
-		BaseURL:  "://bad-base-url",
+		Credentials: config.Credentials{BraveAPIKey: braveTestAPIKey},
+		BaseURL:     "://bad-base-url",
 	})
 
 	_, err := client.SearchVideos(context.Background(), Options{Query: "bad base url"})
@@ -95,8 +95,8 @@ func TestSearchReturnsContextualRequestBuildError(t *testing.T) {
 
 func TestSearchReturnsContextualTransportError(t *testing.T) {
 	client := NewClient(Config{
-		Settings: config.Settings{BraveAPIKey: braveTestAPIKey},
-		BaseURL:  "https://brave.test",
+		Credentials: config.Credentials{BraveAPIKey: braveTestAPIKey},
+		BaseURL:     "https://brave.test",
 		HTTPClient: httpclient.New(httpclient.Options{
 			HTTPClient: &http.Client{Transport: failingRoundTripper{}},
 			Attempts:   1,

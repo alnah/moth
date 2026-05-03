@@ -51,8 +51,8 @@ type recordingAudioRunner struct {
 
 func newOpenAITestClient(baseURL string, runner tools.Runner) *Client {
 	return NewClient(Config{
-		Settings: config.Settings{OpenAIAPIKey: openAITestAPIKey},
-		BaseURL:  baseURL,
+		Credentials: config.Credentials{OpenAIAPIKey: openAITestAPIKey},
+		BaseURL:     baseURL,
 		HTTPClient: httpclient.New(httpclient.Options{
 			Attempts: 1,
 		}),

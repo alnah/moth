@@ -32,8 +32,8 @@ func newBraveTestClient(t *testing.T, server *httptest.Server) *Client {
 	t.Helper()
 
 	return NewClient(Config{
-		Settings: config.Settings{BraveAPIKey: braveTestAPIKey},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{BraveAPIKey: braveTestAPIKey},
+		BaseURL:     server.URL,
 	})
 }
 

@@ -226,8 +226,8 @@ func TestSearchFailsBeforeRequestWhenCredentialsMissing(t *testing.T) {
 		defer server.Close()
 
 		client := NewClient(Config{
-			Settings: config.Settings{PodcastIndexAPIKey: podcastTestAPIKey},
-			BaseURL:  server.URL,
+			Credentials: config.Credentials{PodcastIndexAPIKey: podcastTestAPIKey},
+			BaseURL:     server.URL,
 		})
 
 		_, err := client.Search(context.Background(), SearchOptions{Query: "go"})
@@ -257,7 +257,7 @@ func TestSearchUsesDefaultUserAgentAndClockWhenUnset(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		Settings: config.Settings{
+		Credentials: config.Credentials{
 			PodcastIndexAPIKey:    podcastTestAPIKey,
 			PodcastIndexAPISecret: podcastTestAPISecret,
 		},
@@ -296,7 +296,7 @@ func TestSearchRedactsSecretsFromProviderBody(t *testing.T) {
 
 func newPodcastIndexTestClient(baseURL string) *Client {
 	return NewClient(Config{
-		Settings: config.Settings{
+		Credentials: config.Credentials{
 			PodcastIndexAPIKey:    podcastTestAPIKey,
 			PodcastIndexAPISecret: podcastTestAPISecret,
 		},

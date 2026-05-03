@@ -244,8 +244,8 @@ func TestSearchVideosReturnsTransportErrorWithoutLeakingAPIKey(t *testing.T) {
 		return nil, fmt.Errorf("dial failed for %s: %w", r.URL.String(), sentinel)
 	})
 	client := NewClient(Config{
-		Settings: config.Settings{YouTubeAPIKey: youtubeTestAPIKey},
-		BaseURL:  "https://youtube.example.test",
+		Credentials: config.Credentials{YouTubeAPIKey: youtubeTestAPIKey},
+		BaseURL:     "https://youtube.example.test",
 		HTTPClient: httpclient.New(httpclient.Options{
 			HTTPClient: &http.Client{Transport: transport},
 			Attempts:   1,
@@ -318,8 +318,8 @@ func TestVideoDetailsRejectsInvalidIDsBeforeRequest(t *testing.T) {
 
 func newYouTubeTestClient(baseURL string) *Client {
 	return NewClient(Config{
-		Settings: config.Settings{YouTubeAPIKey: youtubeTestAPIKey},
-		BaseURL:  baseURL,
+		Credentials: config.Credentials{YouTubeAPIKey: youtubeTestAPIKey},
+		BaseURL:     baseURL,
 	})
 }
 

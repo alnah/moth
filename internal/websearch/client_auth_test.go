@@ -20,8 +20,8 @@ func TestSearchFailsBeforeRequestWhenAPIKeyMissing(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		Settings: config.Settings{},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{},
+		BaseURL:     server.URL,
 	})
 
 	_, err := client.SearchWeb(context.Background(), Options{Query: "blocked"})
@@ -46,8 +46,8 @@ func TestSearchTrimsAPIKeyBeforeSendingHeader(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		Settings: config.Settings{BraveAPIKey: "  \t" + braveTestAPIKey + "\n  "},
-		BaseURL:  server.URL,
+		Credentials: config.Credentials{BraveAPIKey: "  \t" + braveTestAPIKey + "\n  "},
+		BaseURL:     server.URL,
 	})
 
 	result, err := client.SearchWeb(context.Background(), Options{Query: "trimmed auth"})
