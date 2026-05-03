@@ -190,46 +190,60 @@ func TestConfigTimeoutCreatesCommandContextDeadline(t *testing.T) {
 }
 
 func TestConfigFlagPrecedence(t *testing.T) {
-	t.Run("max results flag overrides config", func(t *testing.T) {
-		harness := newCommandHarness()
-		configPath := writeCLIConfigFile(t, `{"limits": {"max_results": 13}}`)
+	tests := []struct {
+		name   string
+		config string
+		args   []string
+		assert func(*testing.T, *commandHarness, time.Time)
+	}{
+		{
+			name:   "max results flag overrides config",
+			config: `{"limits": {"max_results": 13}}`,
+			args:   []string{"--max-results", "5", "search", "web", "moth"},
+			assert: func(t *testing.T, harness *commandHarness, _ time.Time) {
+				t.Helper()
+				if harness.webSearch.options.Count != 5 {
+					t.Fatalf("web search count = %d, want flag max-results", harness.webSearch.options.Count)
+				}
+			},
+		},
+		{
+			name:   "max bytes flag overrides config",
+			config: `{"limits": {"max_bytes": 8192}}`,
+			args:   []string{"--max-bytes", "1024", "fetch", "https://example.test"},
+			assert: func(t *testing.T, harness *commandHarness, _ time.Time) {
+				t.Helper()
+				if harness.webFetch.request.MaxBytes != 1024 {
+					t.Fatalf("fetch max bytes = %d, want flag max-bytes", harness.webFetch.request.MaxBytes)
+				}
+			},
+		},
+		{
+			name:   "timeout flag overrides config",
+			config: `{"limits": {"timeout": "20s"}}`,
+			args:   []string{"--timeout", "1s", "search", "web", "moth"},
+			assert: func(t *testing.T, harness *commandHarness, started time.Time) {
+				t.Helper()
+				assertContextDeadlineNear(t, harness.webSearch.hadDeadline, harness.webSearch.deadline, started, time.Second)
+			},
+		},
+	}
 
-		stdout, stderr, err := harness.execute("--config", configPath, "--max-results", "5", "search", "web", "moth")
-		if err != nil {
-			t.Fatalf("execute search command: %v\nstderr: %s", err, stderr)
-		}
-		assertContentPackJSON(t, stdout)
-		if harness.webSearch.options.Count != 5 {
-			t.Fatalf("web search count = %d, want flag max-results", harness.webSearch.options.Count)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			harness := newCommandHarness()
+			configPath := writeCLIConfigFile(t, tt.config)
+			args := append([]string{"--config", configPath}, tt.args...)
+			started := time.Now()
 
-	t.Run("max bytes flag overrides config", func(t *testing.T) {
-		harness := newCommandHarness()
-		configPath := writeCLIConfigFile(t, `{"limits": {"max_bytes": 8192}}`)
-
-		stdout, stderr, err := harness.execute("--config", configPath, "--max-bytes", "1024", "fetch", "https://example.test")
-		if err != nil {
-			t.Fatalf("execute fetch command: %v\nstderr: %s", err, stderr)
-		}
-		assertContentPackJSON(t, stdout)
-		if harness.webFetch.request.MaxBytes != 1024 {
-			t.Fatalf("fetch max bytes = %d, want flag max-bytes", harness.webFetch.request.MaxBytes)
-		}
-	})
-
-	t.Run("timeout flag overrides config", func(t *testing.T) {
-		harness := newCommandHarness()
-		configPath := writeCLIConfigFile(t, `{"limits": {"timeout": "20s"}}`)
-		started := time.Now()
-
-		stdout, stderr, err := harness.execute("--config", configPath, "--timeout", "1s", "search", "web", "moth")
-		if err != nil {
-			t.Fatalf("execute search command: %v\nstderr: %s", err, stderr)
-		}
-		assertContentPackJSON(t, stdout)
-		assertContextDeadlineNear(t, harness.webSearch.hadDeadline, harness.webSearch.deadline, started, time.Second)
-	})
+			stdout, stderr, err := harness.execute(args...)
+			if err != nil {
+				t.Fatalf("execute command: %v\nstderr: %s", err, stderr)
+			}
+			assertContentPackJSON(t, stdout)
+			tt.assert(t, harness, started)
+		})
+	}
 }
 
 func TestConfigRetryValuesFeedDefaultDependencyAssemblyWithoutFlags(t *testing.T) {
