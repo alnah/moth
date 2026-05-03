@@ -12,6 +12,10 @@ type xSinglePostResponse struct {
 	Meta     xResponseMeta `json:"meta"`
 }
 
+type xUserLookupResponse struct {
+	Data xUser `json:"data"`
+}
+
 type xPost struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`

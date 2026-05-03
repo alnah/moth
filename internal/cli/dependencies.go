@@ -76,6 +76,7 @@ type XService interface {
 	SearchRecent(context.Context, xclient.SearchOptions) (content.Pack, error)
 	LookupPost(context.Context, xclient.LookupPostOptions) (content.Pack, error)
 	UserPosts(context.Context, xclient.UserPostsOptions) (content.Pack, error)
+	LookupUserByUsername(context.Context, xclient.UsernameLookupOptions) (content.Pack, error)
 }
 
 // PDF2TextService extracts text from PDFs.

@@ -35,6 +35,13 @@ func userPostsQuery(options UserPostsOptions, limit int) url.Values {
 	return query
 }
 
+func usernameLookupQuery() url.Values {
+	query := url.Values{}
+	query.Set("user.fields", "id,username,name")
+
+	return query
+}
+
 func commonPostQuery() url.Values {
 	query := url.Values{}
 	query.Set("expansions", "author_id")

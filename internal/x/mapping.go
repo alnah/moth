@@ -30,6 +30,15 @@ func mapPost(post xPost, author xUser) content.Item {
 	}
 }
 
+func mapUserProfile(user xUser) content.Item {
+	return content.Item{
+		Kind:     content.KindSocialProfile,
+		URL:      userProfileURL(user.Username),
+		Title:    userProfileTitle(user),
+		Metadata: userProfileMetadata(user),
+	}
+}
+
 func postURL(postID string, username string) string {
 	if username == "" {
 		return xStatusBaseURL + "i/web/status/" + postID
@@ -46,6 +55,25 @@ func postTitle(username string, name string) string {
 	return name
 }
 
+func userProfileURL(username string) string {
+	if username == "" {
+		return ""
+	}
+
+	return xStatusBaseURL + username
+}
+
+func userProfileTitle(user xUser) string {
+	if user.Username != "" {
+		return "@" + user.Username
+	}
+	if user.Name != "" {
+		return user.Name
+	}
+
+	return user.ID
+}
+
 func postMetadata(post xPost, author xUser) map[string]any {
 	metadata := make(map[string]any)
 	addStringMetadata(metadata, "post_id", post.ID)
@@ -53,6 +81,15 @@ func postMetadata(post xPost, author xUser) map[string]any {
 	addStringMetadata(metadata, "author_username", author.Username)
 	addStringMetadata(metadata, "author_name", author.Name)
 	addStringMetadata(metadata, "created_at", post.CreatedAt)
+
+	return metadata
+}
+
+func userProfileMetadata(user xUser) map[string]any {
+	metadata := map[string]any{"source": "x"}
+	addStringMetadata(metadata, "user_id", user.ID)
+	addStringMetadata(metadata, "username", user.Username)
+	addStringMetadata(metadata, "name", user.Name)
 
 	return metadata
 }

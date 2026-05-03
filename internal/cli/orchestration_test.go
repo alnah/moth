@@ -290,6 +290,9 @@ func TestAcquisitionCommandsRouteFakesAndRenderContentPack(t *testing.T) {
 				if !reflect.DeepEqual(harness.x.user, want) {
 					t.Fatalf("x user options = %#v, want %#v", harness.x.user, want)
 				}
+				if harness.x.usernameLookupCalled {
+					t.Fatal("x user called username lookup, want user-ID posts lookup only")
+				}
 			},
 		},
 		{
@@ -808,9 +811,11 @@ func (fake *fakePodcastAudio) DownloadEpisodeAudio(
 }
 
 type fakeX struct {
-	search xclient.SearchOptions
-	post   xclient.LookupPostOptions
-	user   xclient.UserPostsOptions
+	search               xclient.SearchOptions
+	post                 xclient.LookupPostOptions
+	user                 xclient.UserPostsOptions
+	usernameLookup       xclient.UsernameLookupOptions
+	usernameLookupCalled bool
 }
 
 func (fake *fakeX) SearchRecent(_ context.Context, options xclient.SearchOptions) (content.Pack, error) {
@@ -826,6 +831,15 @@ func (fake *fakeX) LookupPost(_ context.Context, options xclient.LookupPostOptio
 func (fake *fakeX) UserPosts(_ context.Context, options xclient.UserPostsOptions) (content.Pack, error) {
 	fake.user = options
 	return samplePack(content.KindSocialPost), nil
+}
+
+func (fake *fakeX) LookupUserByUsername(
+	_ context.Context,
+	options xclient.UsernameLookupOptions,
+) (content.Pack, error) {
+	fake.usernameLookup = options
+	fake.usernameLookupCalled = true
+	return samplePack(content.KindSocialProfile), nil
 }
 
 type fakePDF2Text struct {

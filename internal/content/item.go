@@ -5,16 +5,17 @@ type Kind string
 
 // Supported content item kinds.
 const (
-	KindPage         Kind = "page"
-	KindPDF          Kind = "pdf"
-	KindImage        Kind = "image"
-	KindVideo        Kind = "video"
-	KindAudio        Kind = "audio"
-	KindPodcast      Kind = "podcast"
-	KindSocialPost   Kind = "social_post"
-	KindSocialThread Kind = "social_thread"
-	KindFeed         Kind = "feed"
-	KindFile         Kind = "file"
+	KindPage          Kind = "page"
+	KindPDF           Kind = "pdf"
+	KindImage         Kind = "image"
+	KindVideo         Kind = "video"
+	KindAudio         Kind = "audio"
+	KindPodcast       Kind = "podcast"
+	KindSocialPost    Kind = "social_post"
+	KindSocialThread  Kind = "social_thread"
+	KindSocialProfile Kind = "social_profile"
+	KindFeed          Kind = "feed"
+	KindFile          Kind = "file"
 )
 
 // Item is one normalized content object in a Pack.

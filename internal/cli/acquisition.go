@@ -296,7 +296,24 @@ func addXCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies
 	userCmd.Flags().StringVar(&userOptions.NextToken, "next-token", "", "X pagination token")
 	userCmd.Flags().IntVar(&userOptions.MaxRequests, "max-requests", 0, "maximum X requests")
 
-	xCmd.AddCommand(searchCmd, postCmd, userCmd)
+	userLookupCmd := &cobra.Command{
+		Use:   "user-lookup <username>",
+		Short: "Fetch one X user profile by username",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return newInvalidArgumentsError(errors.New("x user-lookup accepts exactly one username"))
+			}
+			ctx, cancel := commandContext(cmd, rootOptions)
+			defer cancel()
+			pack, err := deps.X.LookupUserByUsername(ctx, x.UsernameLookupOptions{Username: args[0]})
+			if err != nil {
+				return fmt.Errorf("x user-lookup: %w", err)
+			}
+			return renderResult(cmd, rootOptions.Output, pack)
+		},
+	}
+
+	xCmd.AddCommand(searchCmd, postCmd, userCmd, userLookupCmd)
 	root.AddCommand(xCmd)
 }
 
