@@ -77,16 +77,6 @@ func TestCommandArgumentErrorsRenderStableJSON(t *testing.T) {
 			wantMessagePart: "x user accepts exactly one user ID",
 		},
 		{
-			name:            "x user-lookup missing username",
-			args:            []string{"x", "user-lookup"},
-			wantMessagePart: "x user-lookup accepts exactly one username",
-		},
-		{
-			name:            "x user-lookup extra username",
-			args:            []string{"x", "user-lookup", "one", "two"},
-			wantMessagePart: "x user-lookup accepts exactly one username",
-		},
-		{
 			name:            "pdf2txt missing input",
 			args:            []string{"pdf2txt"},
 			wantMessagePart: "pdf2txt accepts exactly one file or URL",

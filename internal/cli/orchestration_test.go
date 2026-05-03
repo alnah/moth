@@ -26,6 +26,10 @@ import (
 	"github.com/alnah/moth/internal/ytdlp"
 )
 
+var _ interface {
+	LookupUserByUsername(context.Context, xclient.UsernameLookupOptions) (content.Pack, error)
+} = (XService)(nil)
+
 func TestExecuteRendersTopLevelJSONErrorsWithoutProcessExit(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -143,7 +147,6 @@ func TestFetchRoutesUseCaseLimitsBrowserModeAndOutputFile(t *testing.T) {
 	}
 }
 
-//nolint:gocyclo // Table-driven CLI routing test intentionally covers many command cases.
 func TestAcquisitionCommandsRouteFakesAndRenderContentPack(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -282,20 +285,6 @@ func TestAcquisitionCommandsRouteFakesAndRenderContentPack(t *testing.T) {
 			},
 		},
 		{
-			name: "x user uses user id",
-			args: []string{"--max-results", "8", "x", "user", "2244994945"},
-			assert: func(t *testing.T, harness *commandHarness) {
-				t.Helper()
-				want := xclient.UserPostsOptions{UserID: "2244994945", MaxResults: 8}
-				if !reflect.DeepEqual(harness.x.user, want) {
-					t.Fatalf("x user options = %#v, want %#v", harness.x.user, want)
-				}
-				if harness.x.usernameLookupCalled {
-					t.Fatal("x user called username lookup, want user-ID posts lookup only")
-				}
-			},
-		},
-		{
 			name: "pdf2txt",
 			args: []string{"--max-bytes", "8192", "pdf2txt", "paper.pdf", "--ocr", "--ocr-language", "fra"},
 			assert: func(t *testing.T, harness *commandHarness) {
@@ -344,6 +333,108 @@ func TestAcquisitionCommandsRouteFakesAndRenderContentPack(t *testing.T) {
 			assertContentPackJSON(t, stdout)
 			tt.assert(t, harness)
 		})
+	}
+}
+
+func TestXUserLookupCommandRoutesUsernameAndRendersContentPack(t *testing.T) {
+	harness := newCommandHarness()
+
+	stdout, stderr, err := harness.execute("x", "user-lookup", "alnah")
+	if err != nil {
+		t.Fatalf("execute x user-lookup: %v\nstderr: %s", err, stderr)
+	}
+	assertContentPackJSON(t, stdout)
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	if !harness.x.usernameLookupCalled {
+		t.Fatal("x user-lookup did not call username lookup service")
+	}
+
+	want := xclient.UsernameLookupOptions{Username: "alnah"}
+	if !reflect.DeepEqual(harness.x.usernameLookup, want) {
+		t.Fatalf("x user-lookup options = %#v, want %#v", harness.x.usernameLookup, want)
+	}
+	if harness.x.userPostsCalled {
+		t.Fatal("x user-lookup called user posts service, want username profile lookup only")
+	}
+}
+
+func TestXUserLookupCommandRejectsInvalidUsernameArgumentsWithStableJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "missing username",
+			args: []string{"x", "user-lookup"},
+		},
+		{
+			name: "extra username",
+			args: []string{"x", "user-lookup", "one", "two"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			harness := newCommandHarness()
+
+			stdout, stderr, err := harness.execute(tt.args...)
+			if err == nil {
+				t.Fatalf("execute %q error = nil, want invalid arguments error", strings.Join(tt.args, " "))
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty stdout for invalid arguments", stdout)
+			}
+
+			document := decodeSingleJSONErrorDocument(t, stderr)
+			if document.Type != "error" {
+				t.Fatalf("type = %q, want error", document.Type)
+			}
+			if document.Error.Code != "invalid_arguments" {
+				t.Fatalf("error.code = %q, want invalid_arguments", document.Error.Code)
+			}
+			if !strings.Contains(document.Error.Message, "x user-lookup accepts exactly one username") {
+				t.Fatalf("error.message = %q, want username argument contract", document.Error.Message)
+			}
+			if len(document.Warnings) != 0 {
+				t.Fatalf("warnings = %#v, want empty array", document.Warnings)
+			}
+		})
+	}
+}
+
+func TestXUserCommandKeepsUserIDPostsRoute(t *testing.T) {
+	harness := newCommandHarness()
+
+	stdout, stderr, err := harness.execute(
+		"--max-results", "8",
+		"x", "user", "2244994945",
+		"--next-token", "older-page",
+		"--max-requests", "2",
+	)
+	if err != nil {
+		t.Fatalf("execute x user: %v\nstderr: %s", err, stderr)
+	}
+	assertContentPackJSON(t, stdout)
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	if !harness.x.userPostsCalled {
+		t.Fatal("x user did not call user posts service")
+	}
+	if harness.x.usernameLookupCalled {
+		t.Fatal("x user called username lookup, want user-ID posts lookup only")
+	}
+
+	want := xclient.UserPostsOptions{
+		UserID:      "2244994945",
+		MaxResults:  8,
+		MaxRequests: 2,
+		NextToken:   "older-page",
+	}
+	if !reflect.DeepEqual(harness.x.user, want) {
+		t.Fatalf("x user options = %#v, want %#v", harness.x.user, want)
 	}
 }
 
@@ -814,6 +905,7 @@ type fakeX struct {
 	search               xclient.SearchOptions
 	post                 xclient.LookupPostOptions
 	user                 xclient.UserPostsOptions
+	userPostsCalled      bool
 	usernameLookup       xclient.UsernameLookupOptions
 	usernameLookupCalled bool
 }
@@ -830,6 +922,7 @@ func (fake *fakeX) LookupPost(_ context.Context, options xclient.LookupPostOptio
 
 func (fake *fakeX) UserPosts(_ context.Context, options xclient.UserPostsOptions) (content.Pack, error) {
 	fake.user = options
+	fake.userPostsCalled = true
 	return samplePack(content.KindSocialPost), nil
 }
 

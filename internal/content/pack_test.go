@@ -66,6 +66,7 @@ func TestItemKindJSONRoundTrip(t *testing.T) {
 		KindPodcast,
 		KindSocialPost,
 		KindSocialThread,
+		KindSocialProfile,
 		KindFeed,
 		KindFile,
 	}
