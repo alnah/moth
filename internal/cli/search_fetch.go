@@ -28,7 +28,7 @@ type fetchFlags struct {
 	Download     bool
 }
 
-func addSearchCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addSearchCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	searchCmd := &cobra.Command{Use: "search", Short: "Search web content"}
 	searchCmd.AddCommand(newSearchKindCommand(
 		"web",
@@ -77,7 +77,7 @@ type commandCallContext struct {
 func newSearchKindCommand(
 	name string,
 	rootOptions *rootFlags,
-	_ Dependencies,
+	_ *Dependencies,
 	run func(commandCallContext, websearch.Options) error,
 ) *cobra.Command {
 	options := searchFlags{}
@@ -113,7 +113,7 @@ func newSearchKindCommand(
 	return cmd
 }
 
-func addFetchCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addFetchCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	options := fetchFlags{}
 	cmd := &cobra.Command{
 		Use:   "fetch <url>",

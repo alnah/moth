@@ -14,7 +14,7 @@ type toolsFlags struct {
 	ToolsDir string
 }
 
-func addToolsCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addToolsCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	options := toolsFlags{}
 
 	toolsCmd := &cobra.Command{

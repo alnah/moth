@@ -16,7 +16,7 @@ import (
 	"github.com/alnah/moth/internal/ytdlp"
 )
 
-func addYouTubeCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addYouTubeCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	youtubeCmd := &cobra.Command{Use: "youtube", Short: "Search and acquire YouTube content"}
 
 	var searchOptions struct {
@@ -134,7 +134,7 @@ func addYouTubeCommand(root *cobra.Command, rootOptions *rootFlags, deps Depende
 	root.AddCommand(youtubeCmd)
 }
 
-func addPodcastCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addPodcastCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	podcastCmd := &cobra.Command{Use: "podcast", Short: "Search and acquire podcast content"}
 
 	var podcastSearchOptions struct {
@@ -220,7 +220,7 @@ func addPodcastCommand(root *cobra.Command, rootOptions *rootFlags, deps Depende
 	root.AddCommand(podcastCmd)
 }
 
-func addXCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addXCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	xCmd := &cobra.Command{Use: "x", Short: "Search and fetch X posts"}
 
 	var searchOptions struct {
@@ -300,7 +300,7 @@ func addXCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies)
 	root.AddCommand(xCmd)
 }
 
-func addPDF2TextCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addPDF2TextCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	var options struct {
 		OCRAllowed  bool
 		OCRDisabled bool
@@ -333,7 +333,7 @@ func addPDF2TextCommand(root *cobra.Command, rootOptions *rootFlags, deps Depend
 	root.AddCommand(cmd)
 }
 
-func addTranscribeCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addTranscribeCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	var options struct {
 		Language               string
 		Model                  string

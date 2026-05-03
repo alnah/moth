@@ -7,6 +7,8 @@ import (
 	"github.com/alnah/moth/internal/browser"
 	"github.com/alnah/moth/internal/config"
 	"github.com/alnah/moth/internal/content"
+	"github.com/alnah/moth/internal/httpclient"
+	"github.com/alnah/moth/internal/limits"
 	"github.com/alnah/moth/internal/pdf2txt"
 	"github.com/alnah/moth/internal/podcast"
 	"github.com/alnah/moth/internal/tools"
@@ -112,8 +114,75 @@ type BrowserService interface {
 	Download(context.Context, browser.DownloadRequest) (browser.CapturedDownload, error)
 }
 
-func defaultDependencies() Dependencies {
+type defaultDependencyOptions struct {
+	Limits limits.Options
+}
+
+type defaultDependencySet struct {
+	Dependencies
+	browserPool *browser.Pool
+}
+
+type defaultDependencyRuntime struct {
+	options *rootFlags
+	set     defaultDependencySet
+}
+
+func newDefaultDependencyRuntime(options *rootFlags) *defaultDependencyRuntime {
+	return &defaultDependencyRuntime{options: options}
+}
+
+func (runtime *defaultDependencyRuntime) fill(deps *Dependencies) {
+	if dependenciesComplete(*deps) {
+		return
+	}
+
+	runtime.set = defaultDependencies(defaultDependencyOptions{Limits: runtime.options.Limits})
+	if deps.WebSearch == nil {
+		deps.WebSearch = runtime.set.WebSearch
+	}
+	if deps.WebFetch == nil {
+		deps.WebFetch = runtime.set.WebFetch
+	}
+	if deps.YouTube == nil {
+		deps.YouTube = runtime.set.YouTube
+	}
+	if deps.YTDLP == nil {
+		deps.YTDLP = runtime.set.YTDLP
+	}
+	if deps.Podcast == nil {
+		deps.Podcast = runtime.set.Podcast
+	}
+	if deps.PodcastAudio == nil {
+		deps.PodcastAudio = runtime.set.PodcastAudio
+	}
+	if deps.X == nil {
+		deps.X = runtime.set.X
+	}
+	if deps.PDF2Text == nil {
+		deps.PDF2Text = runtime.set.PDF2Text
+	}
+	if deps.Transcription == nil {
+		deps.Transcription = runtime.set.Transcription
+	}
+	if deps.Tools == nil {
+		deps.Tools = runtime.set.Tools
+	}
+	if deps.Browser == nil {
+		deps.Browser = runtime.set.Browser
+	}
+}
+
+func (runtime *defaultDependencyRuntime) closeBrowserPool() error {
+	if runtime.set.browserPool == nil {
+		return nil
+	}
+	return runtime.set.browserPool.Close()
+}
+
+func defaultDependencies(options defaultDependencyOptions) defaultDependencySet {
 	settings, _ := config.LoadFromEnv(nil)
+	retryingHTTPClient := defaultRetryingHTTPClient(options.Limits)
 	browserBin := settings.RodBrowserBin
 	if browserBin == "" {
 		resolved, err := tools.ResolveBrowser(context.Background(), tools.BrowserDoctorOptions{
@@ -129,61 +198,51 @@ func defaultDependencies() Dependencies {
 		Stateless:  browserPool,
 	})
 
-	return Dependencies{
-		WebSearch:     websearch.NewClient(websearch.Config{Settings: settings}),
-		WebFetch:      webfetch.New(webfetch.Options{BrowserFetcher: poolBrowserFetcher{pool: browserPool}}),
-		YouTube:       youtube.NewClient(youtube.Config{Settings: settings}),
-		YTDLP:         ytdlp.New(ytdlp.Config{}),
-		Podcast:       podcast.NewClient(podcast.Config{Settings: settings}),
-		PodcastAudio:  podcast.NewAudioDownloader(podcast.AudioDownloaderConfig{}),
-		X:             xclient.NewClient(xclient.Config{Settings: settings}),
-		PDF2Text:      pdf2TextAdapter{},
-		Transcription: transcription.NewClient(transcription.Config{Settings: settings}),
-		Tools:         toolsAdapter{},
-		Browser:       browserService,
+	return defaultDependencySet{
+		Dependencies: Dependencies{
+			WebSearch: websearch.NewClient(websearch.Config{
+				Settings:   settings,
+				HTTPClient: retryingHTTPClient,
+			}),
+			WebFetch: webfetch.New(webfetch.Options{BrowserFetcher: poolBrowserFetcher{pool: browserPool}}),
+			YouTube: youtube.NewClient(youtube.Config{
+				Settings:   settings,
+				HTTPClient: retryingHTTPClient,
+			}),
+			YTDLP: ytdlp.New(ytdlp.Config{}),
+			Podcast: podcast.NewClient(podcast.Config{
+				Settings:   settings,
+				HTTPClient: retryingHTTPClient,
+			}),
+			PodcastAudio: podcast.NewAudioDownloader(podcast.AudioDownloaderConfig{}),
+			X: xclient.NewClient(xclient.Config{
+				Settings:   settings,
+				HTTPClient: retryingHTTPClient,
+			}),
+			PDF2Text: pdf2TextAdapter{},
+			Transcription: transcription.NewClient(transcription.Config{
+				Settings:   settings,
+				HTTPClient: retryingHTTPClient,
+			}),
+			Tools:   toolsAdapter{},
+			Browser: browserService,
+		},
+		browserPool: browserPool,
 	}
 }
 
-func fillDefaultDependencies(deps Dependencies) Dependencies {
-	if dependenciesComplete(deps) {
-		return deps
+func defaultRetryingHTTPClient(options limits.Options) *httpclient.Client {
+	httpOptions := httpclient.Options{}
+	if options.Retries > 0 {
+		httpOptions.Attempts = options.Retries + 1
 	}
-
-	defaults := defaultDependencies()
-	if deps.WebSearch == nil {
-		deps.WebSearch = defaults.WebSearch
+	if options.RetryBase != limits.DefaultRetryBase {
+		httpOptions.RetryBase = options.RetryBase
 	}
-	if deps.WebFetch == nil {
-		deps.WebFetch = defaults.WebFetch
+	if options.RetryMax != limits.DefaultRetryMax {
+		httpOptions.RetryMax = options.RetryMax
 	}
-	if deps.YouTube == nil {
-		deps.YouTube = defaults.YouTube
-	}
-	if deps.YTDLP == nil {
-		deps.YTDLP = defaults.YTDLP
-	}
-	if deps.Podcast == nil {
-		deps.Podcast = defaults.Podcast
-	}
-	if deps.PodcastAudio == nil {
-		deps.PodcastAudio = defaults.PodcastAudio
-	}
-	if deps.X == nil {
-		deps.X = defaults.X
-	}
-	if deps.PDF2Text == nil {
-		deps.PDF2Text = defaults.PDF2Text
-	}
-	if deps.Transcription == nil {
-		deps.Transcription = defaults.Transcription
-	}
-	if deps.Tools == nil {
-		deps.Tools = defaults.Tools
-	}
-	if deps.Browser == nil {
-		deps.Browser = defaults.Browser
-	}
-	return deps
+	return httpclient.New(httpOptions)
 }
 
 func dependenciesComplete(deps Dependencies) bool {

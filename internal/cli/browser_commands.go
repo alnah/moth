@@ -19,7 +19,7 @@ type browserScopeFlags struct {
 	Scope string
 }
 
-func addBrowserCommand(root *cobra.Command, rootOptions *rootFlags, deps Dependencies) {
+func addBrowserCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
 	browserCmd := &cobra.Command{Use: "browser", Short: "Run browser operations"}
 	browserCmd.AddCommand(
 		newBrowserStartCommand(rootOptions, deps),
@@ -43,7 +43,7 @@ func addBrowserCommand(root *cobra.Command, rootOptions *rootFlags, deps Depende
 	root.AddCommand(browserCmd)
 }
 
-func newBrowserStartCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserStartCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserScopeFlags{Scope: "auto"}
 	show := false
 	cmd := &cobra.Command{
@@ -67,7 +67,7 @@ func newBrowserStartCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Co
 	return cmd
 }
 
-func newBrowserStopCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserStopCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserScopeFlags{Scope: "auto"}
 	cmd := &cobra.Command{
 		Use:   "stop",
@@ -89,7 +89,7 @@ func newBrowserStopCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Com
 	return cmd
 }
 
-func newBrowserStatusCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserStatusCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserScopeFlags{Scope: "auto"}
 	cmd := &cobra.Command{
 		Use:   "status",
@@ -111,7 +111,7 @@ func newBrowserStatusCommand(rootOptions *rootFlags, deps Dependencies) *cobra.C
 	return cmd
 }
 
-func newBrowserConnectCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserConnectCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserScopeFlags{Scope: "auto"}
 	cmd := &cobra.Command{
 		Use:   "connect <host:port>",
@@ -133,7 +133,7 @@ func newBrowserConnectCommand(rootOptions *rootFlags, deps Dependencies) *cobra.
 	return cmd
 }
 
-func newBrowserOpenCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserOpenCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "open <url>",
@@ -159,7 +159,7 @@ func newBrowserOpenCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Com
 	return cmd
 }
 
-func newBrowserPagesCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserPagesCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "pages",
@@ -184,7 +184,7 @@ func newBrowserPagesCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Co
 	return cmd
 }
 
-func newBrowserPageCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserPageCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "page <page-id>",
@@ -206,7 +206,7 @@ func newBrowserPageCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Com
 	return cmd
 }
 
-func newBrowserClosePageCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserClosePageCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "close-page [page-id]",
@@ -231,7 +231,7 @@ func newBrowserClosePageCommand(rootOptions *rootFlags, deps Dependencies) *cobr
 	return cmd
 }
 
-func newBrowserClickCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserClickCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "click <selector>",
@@ -257,7 +257,7 @@ func newBrowserClickCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Co
 	return cmd
 }
 
-func newBrowserInputCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserInputCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "input <selector> <text>",
@@ -284,7 +284,7 @@ func newBrowserInputCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Co
 	return cmd
 }
 
-func newBrowserWaitCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserWaitCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	state := string(browser.WaitAttached)
 	cmd := &cobra.Command{
@@ -317,7 +317,7 @@ func newBrowserWaitCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Com
 	return cmd
 }
 
-func newBrowserMetadataCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserMetadataCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	maxHeaderBytes := 0
 	cmd := &cobra.Command{
 		Use:   "metadata <url>",
@@ -342,7 +342,7 @@ func newBrowserMetadataCommand(rootOptions *rootFlags, deps Dependencies) *cobra
 	return cmd
 }
 
-func newBrowserAXTreeCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserAXTreeCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	maxDepth := 0
 	cmd := &cobra.Command{
@@ -371,7 +371,7 @@ func newBrowserAXTreeCommand(rootOptions *rootFlags, deps Dependencies) *cobra.C
 	return cmd
 }
 
-func newBrowserChallengeCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserChallengeCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "challenge",
@@ -397,7 +397,7 @@ func newBrowserChallengeCommand(rootOptions *rootFlags, deps Dependencies) *cobr
 	return cmd
 }
 
-func newBrowserScreenshotCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserScreenshotCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	fullPage := false
 	cmd := &cobra.Command{
 		Use:   "screenshot <url> <path>",
@@ -424,7 +424,7 @@ func newBrowserScreenshotCommand(rootOptions *rootFlags, deps Dependencies) *cob
 	return cmd
 }
 
-func newBrowserPDFCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserPDFCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pdf <url> <path>",
 		Short: "Capture a page PDF",
@@ -444,7 +444,7 @@ func newBrowserPDFCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Comm
 	return cmd
 }
 
-func newBrowserDownloadCommand(rootOptions *rootFlags, deps Dependencies) *cobra.Command {
+func newBrowserDownloadCommand(rootOptions *rootFlags, deps *Dependencies) *cobra.Command {
 	flags := browserSessionFlags{}
 	cmd := &cobra.Command{
 		Use:   "download <selector> <path>",

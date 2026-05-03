@@ -67,8 +67,8 @@ func (err renderedCommandError) Unwrap() error {
 
 // NewRootCommand builds the testable root CLI without exiting the process.
 func NewRootCommand(deps Dependencies) *cobra.Command {
-	deps = fillDefaultDependencies(deps)
 	options := newRootFlags()
+	dependencyRuntime := newDefaultDependencyRuntime(options)
 
 	cmd := &cobra.Command{
 		Use:           "moth",
@@ -76,6 +76,9 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+			dependencyRuntime.fill(&deps)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				return newUnknownCommandError(args[0])
@@ -108,16 +111,16 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	flags.DurationVar(&options.Limits.RetryBase, "retry-base", options.Limits.RetryBase, "base retry delay")
 	flags.DurationVar(&options.Limits.RetryMax, "retry-max", options.Limits.RetryMax, "maximum retry delay")
 
-	addSearchCommand(cmd, options, deps)
-	addFetchCommand(cmd, options, deps)
-	addBrowserCommand(cmd, options, deps)
-	addYouTubeCommand(cmd, options, deps)
-	addPodcastCommand(cmd, options, deps)
-	addXCommand(cmd, options, deps)
-	addPDF2TextCommand(cmd, options, deps)
-	addTranscribeCommand(cmd, options, deps)
-	addToolsCommand(cmd, options, deps)
-	renderCommandErrors(cmd, &options.Output)
+	addSearchCommand(cmd, options, &deps)
+	addFetchCommand(cmd, options, &deps)
+	addBrowserCommand(cmd, options, &deps)
+	addYouTubeCommand(cmd, options, &deps)
+	addPodcastCommand(cmd, options, &deps)
+	addXCommand(cmd, options, &deps)
+	addPDF2TextCommand(cmd, options, &deps)
+	addTranscribeCommand(cmd, options, &deps)
+	addToolsCommand(cmd, options, &deps)
+	renderCommandErrors(cmd, &options.Output, dependencyRuntime.closeBrowserPool)
 
 	return cmd
 }
@@ -150,19 +153,21 @@ func newCommandError(code string, message string, cause error, writeContext stri
 	}
 }
 
-func renderCommandErrors(command *cobra.Command, output *outputFlags) {
+func renderCommandErrors(command *cobra.Command, output *outputFlags, cleanup func() error) {
 	if command.RunE != nil {
 		run := command.RunE
 		command.RunE = func(cmd *cobra.Command, args []string) error {
-			if err := run(cmd, args); err != nil {
-				return renderCommandError(cmd, *output, err)
+			runErr := run(cmd, args)
+			cleanupErr := cleanup()
+			if runErr != nil {
+				return renderCommandError(cmd, *output, errors.Join(runErr, cleanupErr))
 			}
 			return nil
 		}
 	}
 
 	for _, child := range command.Commands() {
-		renderCommandErrors(child, output)
+		renderCommandErrors(child, output, cleanup)
 	}
 }
 

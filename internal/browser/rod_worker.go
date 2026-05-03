@@ -55,7 +55,7 @@ func newRodWorker(ctx context.Context, config poolConfig) (*rodWorker, error) {
 		browserLauncher = browserLauncher.Proxy(config.proxyURL)
 	}
 	if userDataDir != "" {
-		browserLauncher = browserLauncher.UserDataDir(userDataDir).KeepUserDataDir()
+		browserLauncher = browserLauncher.UserDataDir(userDataDir)
 	}
 
 	controlURL, err := browserLauncher.Launch()
@@ -68,8 +68,7 @@ func newRodWorker(ctx context.Context, config poolConfig) (*rodWorker, error) {
 
 	rodBrowser := rod.New().ControlURL(controlURL).Context(ctx)
 	if err := rodBrowser.Connect(); err != nil {
-		browserLauncher.Kill()
-		browserLauncher.Cleanup()
+		cleanupRodLauncher(browserLauncher, userDataDir != "")
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
@@ -168,9 +167,16 @@ func (worker *rodWorker) cleanupLauncherProcess() {
 	if worker.launcher == nil {
 		return
 	}
-	worker.launcher.Kill()
-	worker.launcher.Cleanup()
+	cleanupRodLauncher(worker.launcher, worker.options.UserDataDir != "")
 	worker.launcher = nil
+}
+
+func cleanupRodLauncher(browserLauncher *launcher.Launcher, preserveUserDataDir bool) {
+	browserLauncher.Kill()
+	if preserveUserDataDir {
+		return
+	}
+	browserLauncher.Cleanup()
 }
 
 func closeBrowserWithTimeout(browser *rod.Browser) error {
