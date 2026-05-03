@@ -45,11 +45,6 @@ type UserPostsOptions struct {
 	NextToken   string
 }
 
-// UsernameLookupOptions contains X username lookup parameters.
-type UsernameLookupOptions struct {
-	Username string
-}
-
 // Client sends read-only raw HTTP requests to the X API.
 type Client struct {
 	credentials config.Credentials
@@ -108,22 +103,6 @@ func (client *Client) LookupPost(ctx context.Context, options LookupPostOptions)
 	return content.Pack{
 		Type:     content.TypeContentPack,
 		Items:    mapPosts([]xPost{response.Data}, usersByID(response.Includes.Users), 1),
-		Metadata: metadata,
-	}, nil
-}
-
-// LookupUserByUsername returns one normalized X user profile.
-func (client *Client) LookupUserByUsername(ctx context.Context, options UsernameLookupOptions) (content.Pack, error) {
-	var response xUserLookupResponse
-	path := "/2/users/by/username/" + url.PathEscape(options.Username)
-	metadata, err := client.get(ctx, "username lookup", path, usernameLookupQuery(), &response)
-	if err != nil {
-		return content.Pack{}, err
-	}
-
-	return content.Pack{
-		Type:     content.TypeContentPack,
-		Items:    []content.Item{mapUserProfile(response.Data)},
 		Metadata: metadata,
 	}, nil
 }
