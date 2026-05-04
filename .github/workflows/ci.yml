@@ -125,6 +125,9 @@ jobs:
 
   browser-test:
     runs-on: ubuntu-latest
+    env:
+      MOTH_BROWSER_REQUIRED: "1"
+      ROD_NO_SANDBOX: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -137,8 +140,6 @@ jobs:
           go-version-file: go.mod
 
       - name: Browser tests
-        env:
-          MOTH_BROWSER_REQUIRED: "1"
         run: go test -tags browser ./internal/browser
 
       - name: Browser coverage
