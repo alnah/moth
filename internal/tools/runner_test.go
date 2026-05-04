@@ -116,7 +116,6 @@ func TestRunStopsProcessWhenContextIsCanceled(t *testing.T) {
 	defer cancel()
 
 	runDone := make(chan error, 1)
-	started := time.Now()
 	go func() {
 		_, err := tools.Run(ctx, tools.Command{
 			Path: programPath,
@@ -126,9 +125,10 @@ func TestRunStopsProcessWhenContextIsCanceled(t *testing.T) {
 	}()
 
 	waitForFile(t, readyPath)
+	canceledAt := time.Now()
 	cancel()
 	err := <-runDone
-	elapsed := time.Since(started)
+	elapsed := time.Since(canceledAt)
 
 	if err == nil {
 		t.Fatal("run canceled fake tool error = nil, want context cancellation error")

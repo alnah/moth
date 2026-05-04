@@ -43,8 +43,10 @@ Thumbs.db
 *.test
 .coverprofile
 bin/
+dist/
 cover.out
 coverage.out
+coverage-browser.out
 
 # Agents
 .claude/

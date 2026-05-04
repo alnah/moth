@@ -1,0 +1,63 @@
+version: 2
+
+project_name: moth
+
+before:
+  hooks:
+    - ./scripts/ensure-v0-release-tag.sh
+
+builds:
+  - id: moth
+    main: ./cmd/moth
+    binary: moth
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+      - -mod=readonly
+    ldflags:
+      - -s -w -X github.com/alnah/moth/internal/cli.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: moth
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "(?i)^docs?:"
+      - "(?i)^tests?:"
+      - "(?i)^test:"
+      - "(?i)^chore:"
+      - "(?i)^ci:"
+      - "(?i)^build:"
+      - "^Merge pull request"
+      - "^Merge branch"
+
+release:
+  github:
+    owner: alnah
+    name: moth

@@ -128,6 +128,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	addPDF2TextCommand(cmd, options, &deps)
 	addTranscribeCommand(cmd, options, &deps)
 	addToolsCommand(cmd, options, &deps)
+	addVersionCommand(cmd, options)
 	renderCommandErrors(cmd, &options.Output, dependencyRuntime.closeBrowserPool)
 
 	return cmd

@@ -95,6 +95,33 @@ func TestRootCommandPrettyJSONError(t *testing.T) {
 	}
 }
 
+func TestVersionCommandRendersStableJSON(t *testing.T) {
+	previousVersion := version
+	version = "v0.1.2"
+	t.Cleanup(func() { version = previousVersion })
+
+	stdout, stderr, err := executeRootCommand("version")
+	if err != nil {
+		t.Fatalf("execute version command: %v\nstderr: %s", err, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty stderr", stderr)
+	}
+
+	var document versionDocument
+	decoder := json.NewDecoder(strings.NewReader(stdout))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode version JSON %q: %v", stdout, err)
+	}
+	if document.Type != "version" {
+		t.Fatalf("type = %q, want version", document.Type)
+	}
+	if document.Version != "v0.1.2" {
+		t.Fatalf("version = %q, want v0.1.2", document.Version)
+	}
+}
+
 func TestRootCommandRejectsJSONFlag(t *testing.T) {
 	stdout, stderr, err := executeRootCommand("--json")
 	if err == nil {
