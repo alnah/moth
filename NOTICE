@@ -1,0 +1,15 @@
+Moth
+Copyright 2026 Alexis Nahan
+
+The Moth software source code is licensed under the Apache License, Version 2.0.
+See LICENSE for the license text.
+
+Moth integrates with third-party services, APIs, websites, browsers, and local
+external tools. Moth is not affiliated with or endorsed by Brave, YouTube,
+Google, Podcast Index, OpenAI, X, Chrome, Chromium, yt-dlp, FFmpeg, Poppler,
+OCRmyPDF, Tesseract, or any content provider.
+
+Third-party services, APIs, websites, media, trademarks, and downloaded content
+remain subject to their original terms and rights. The Apache License, Version
+2.0 does not grant rights to third-party content fetched, extracted,
+downloaded, transcribed, converted, or otherwise processed with Moth.
