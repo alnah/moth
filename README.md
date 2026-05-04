@@ -6,10 +6,11 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/alnah/moth.svg)](https://pkg.go.dev/github.com/alnah/moth)
 
 > Moth is a command-line interface (CLI) that discovers, fetches,
-> extracts, transcribes, and normalizes web and media content as JSON.
+> extracts, transcribes, and normalizes web and media content as JSON
+> for educational purpose.
 
 Moth runs provider API calls, browser capture, and local acquisition tools from
-one JSON-first CLI. Coding agents can use its JSON output. Moth has no cache and no database,
+one JSON-first CLI. Coding agents can use its JSON output. Moth has no cache and no database
 to respect content creators and providers. Teachers, schools, publishers, or learners
 should pair it with [Ogmi](https://github.com/alnah/ogmi) to design educational materials
 based on authentic documents.
