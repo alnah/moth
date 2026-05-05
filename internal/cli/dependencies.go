@@ -208,6 +208,12 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 		Stateless:  browserPool,
 	})
 
+	ytdlpToolPath := ""
+	resolvedYTDLP, err := tools.Resolve(context.Background(), tools.ResolveOptions{Name: tools.ToolYTDLP})
+	if err == nil {
+		ytdlpToolPath = resolvedYTDLP.Path
+	}
+
 	return defaultDependencySet{
 		Dependencies: Dependencies{
 			WebSearch: websearch.NewClient(websearch.Config{
@@ -219,7 +225,7 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 				Credentials: credentials,
 				HTTPClient:  retryingHTTPClient,
 			}),
-			YTDLP: ytdlp.New(ytdlp.Config{}),
+			YTDLP: ytdlp.New(ytdlp.Config{ToolPath: ytdlpToolPath}),
 			Podcast: podcast.NewClient(podcast.Config{
 				Credentials: credentials,
 				HTTPClient:  retryingHTTPClient,
