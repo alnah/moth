@@ -190,29 +190,14 @@ var defaultDependencyFactory = defaultDependencies
 func defaultDependencies(options defaultDependencyOptions) defaultDependencySet {
 	credentials, environmentSettings, _ := config.LoadFromEnv(nil)
 	retryingHTTPClient := defaultRetryingHTTPClient(options.Limits)
-	browserBin := options.BrowserBin
-	if browserBin == "" {
-		browserBin = environmentSettings.RodBrowserBin
-	}
-	if browserBin == "" {
-		resolved, err := tools.ResolveBrowser(context.Background(), tools.BrowserDoctorOptions{
-			SearchCommonInstallPaths: true,
-		}, tools.Platform{OS: runtime.GOOS})
-		if err == nil {
-			browserBin = resolved.Path
-		}
-	}
+	browserBin := resolvedBrowserBin(options.BrowserBin, environmentSettings.RodBrowserBin)
 	browserPool := browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(browserBin))
 	browserService := browser.NewPersistentService(browser.PersistentServiceOptions{
 		BrowserBin: browserBin,
 		Stateless:  browserPool,
 	})
 
-	ytdlpToolPath := ""
-	resolvedYTDLP, err := tools.Resolve(context.Background(), tools.ResolveOptions{Name: tools.ToolYTDLP})
-	if err == nil {
-		ytdlpToolPath = resolvedYTDLP.Path
-	}
+	ytdlpToolPath := resolvedYTDLPPath()
 
 	return defaultDependencySet{
 		Dependencies: Dependencies{
@@ -245,6 +230,31 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 		},
 		browserPool: browserPool,
 	}
+}
+
+func resolvedBrowserBin(configuredPath string, environmentPath string) string {
+	if configuredPath != "" {
+		return configuredPath
+	}
+	if environmentPath != "" {
+		return environmentPath
+	}
+
+	resolved, err := tools.ResolveBrowser(context.Background(), tools.BrowserDoctorOptions{
+		SearchCommonInstallPaths: true,
+	}, tools.Platform{OS: runtime.GOOS})
+	if err != nil {
+		return ""
+	}
+	return resolved.Path
+}
+
+func resolvedYTDLPPath() string {
+	resolved, err := tools.Resolve(context.Background(), tools.ResolveOptions{Name: tools.ToolYTDLP})
+	if err != nil {
+		return ""
+	}
+	return resolved.Path
 }
 
 func defaultRetryingHTTPClient(options limits.Options) *httpclient.Client {
