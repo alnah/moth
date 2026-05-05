@@ -122,6 +122,36 @@ func TestVersionCommandRendersStableJSON(t *testing.T) {
 	}
 }
 
+func TestVersionCommandArgumentErrorRendersStableJSON(t *testing.T) {
+	stdout, stderr, err := executeRootCommand("version", "extra")
+	if err == nil {
+		t.Fatal("execute version extra error = nil, want invalid arguments error")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty stdout for invalid arguments", stdout)
+	}
+
+	document := decodeSingleJSONErrorDocument(t, stderr)
+	if document.Type != "error" {
+		t.Fatalf("type = %q, want error", document.Type)
+	}
+	if document.Error.Code != "invalid_arguments" {
+		t.Fatalf("error.code = %q, want invalid_arguments", document.Error.Code)
+	}
+	messageMentionsNoArgs := strings.Contains(document.Error.Message, "version accepts no positional arguments")
+	messageMentionsUnexpectedArg := strings.Contains(document.Error.Message, "version") &&
+		strings.Contains(document.Error.Message, "extra")
+	if !messageMentionsNoArgs && !messageMentionsUnexpectedArg {
+		t.Fatalf("error.message = %q, want version positional argument contract", document.Error.Message)
+	}
+	if document.Warnings == nil {
+		t.Fatal("warnings = nil, want empty array")
+	}
+	if len(document.Warnings) != 0 {
+		t.Fatalf("warnings = %#v, want empty array", document.Warnings)
+	}
+}
+
 func TestRootCommandRejectsJSONFlag(t *testing.T) {
 	stdout, stderr, err := executeRootCommand("--json")
 	if err == nil {

@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"errors"
+
+	"github.com/spf13/cobra"
+)
 
 // version is replaced by release builds.
 var version = "dev"
@@ -14,8 +18,10 @@ func addVersionCommand(root *cobra.Command, rootOptions *rootFlags) {
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print Moth version",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return newInvalidArgumentsError(errors.New("version accepts no positional arguments"))
+			}
 			return renderResult(cmd, rootOptions.Output, versionDocument{
 				Type:    "version",
 				Version: version,
