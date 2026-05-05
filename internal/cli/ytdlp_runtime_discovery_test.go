@@ -1,22 +1,15 @@
 package cli
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDefaultDependenciesDiscoverYTDLPFromPATHForRuntimeCommands(t *testing.T) {
 	toolsDir := t.TempDir()
-	buildFakeYTDLPExecutable(t, filepath.Join(toolsDir, testExecutableName("yt-dlp")))
-	prependTestPATH(t, toolsDir)
+	buildTestExecutable(t, filepath.Join(toolsDir, executableName("yt-dlp")), fakeYTDLPSource)
+	prependPATH(t, toolsDir)
 
 	tests := []struct {
 		name string
@@ -41,7 +34,7 @@ func TestDefaultDependenciesDiscoverYTDLPFromPATHForRuntimeCommands(t *testing.T
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stdout, stderr, err := executeDefaultRootCommand(t, tt.args...)
+			stdout, stderr, err := executeDefaultCLI(t, tt.args...)
 			if err != nil {
 				t.Fatalf("execute %q with PATH yt-dlp: %v\nstderr: %s", strings.Join(tt.args, " "), err, stderr)
 			}
@@ -53,22 +46,7 @@ func TestDefaultDependenciesDiscoverYTDLPFromPATHForRuntimeCommands(t *testing.T
 	}
 }
 
-func executeDefaultRootCommand(t *testing.T, args ...string) (string, string, error) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	err := Execute(ctx, args, &stdout, &stderr)
-	return stdout.String(), stderr.String(), err
-}
-
-func buildFakeYTDLPExecutable(t *testing.T, binaryPath string) {
-	t.Helper()
-
-	sourcePath := filepath.Join(t.TempDir(), "main.go")
-	const source = `package main
+const fakeYTDLPSource = `package main
 
 import (
 	"fmt"
@@ -129,33 +107,3 @@ func flagValue(args []string, flag string) string {
 	return ""
 }
 `
-	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
-		t.Fatalf("write fake yt-dlp source: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	//nolint:gosec // Test builds a controlled fake yt-dlp executable.
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, sourcePath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("build fake yt-dlp: %v\n%s", err, output)
-	}
-}
-
-func prependTestPATH(t *testing.T, dir string) {
-	t.Helper()
-
-	path := dir
-	if current := os.Getenv("PATH"); current != "" {
-		path = fmt.Sprintf("%s%c%s", dir, os.PathListSeparator, current)
-	}
-	t.Setenv("PATH", path)
-}
-
-func testExecutableName(name string) string {
-	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
-		return name + ".exe"
-	}
-	return name
-}
