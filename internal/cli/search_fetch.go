@@ -20,12 +20,8 @@ type searchFlags struct {
 }
 
 type fetchFlags struct {
-	UseBrowser   bool
-	IncludeText  bool
-	IncludeHTML  bool
-	IncludeMedia bool
-	Screenshot   string
-	Download     bool
+	UseBrowser  bool
+	IncludeText bool
 }
 
 func addSearchCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependencies) {
@@ -140,9 +136,5 @@ func addFetchCommand(root *cobra.Command, rootOptions *rootFlags, deps *Dependen
 	}
 	cmd.Flags().BoolVar(&options.UseBrowser, "browser", false, "fetch with browser rendering")
 	cmd.Flags().BoolVar(&options.IncludeText, "text", false, "include extracted text")
-	cmd.Flags().BoolVar(&options.IncludeHTML, "html", false, "include HTML")
-	cmd.Flags().BoolVar(&options.IncludeMedia, "media", false, "include media candidates")
-	cmd.Flags().StringVar(&options.Screenshot, "screenshot", "", "screenshot output path")
-	cmd.Flags().BoolVar(&options.Download, "download", false, "download linked asset")
 	root.AddCommand(cmd)
 }

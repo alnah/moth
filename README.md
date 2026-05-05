@@ -29,8 +29,7 @@ and rights.
 
 - Returns JSON by default.
 - Searches web, image, and video results through Brave Search.
-- Fetches one URL and can extract text, HTML, linked media URLs, screenshots,
-  or downloaded assets.
+- Fetches one URL and can extract text, with optional browser rendering.
 - Searches YouTube, fetches YouTube metadata, downloads subtitles, and extracts
   audio through `yt-dlp`.
 - Searches podcasts through Podcast Index, lists episodes, and downloads episode
