@@ -2,6 +2,7 @@
 package browser
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -215,6 +216,51 @@ func TestPersistentServiceClosePageUpdatesStoredActivePageAndDownloadsFromActive
 		t.Fatalf("Download(active) = %#v, want captured archive", download)
 	}
 	wantDownloads := []DownloadRequest{{PageID: "page-1", Selector: "#archive", Path: "archive.zip"}}
+	if !reflect.DeepEqual(persistentBrowser.downloads, wantDownloads) {
+		t.Fatalf("download requests = %#v, want %#v", persistentBrowser.downloads, wantDownloads)
+	}
+}
+
+func TestPersistentServiceDownloadWritesRawBytesToRequestedPath(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	stateDirs := newTestStateDirs(t)
+	rawBytes := []byte("archive bytes")
+	persistentBrowser := newFakePersistentBrowser()
+	persistentBrowser.downloadResult = CapturedDownload{Bytes: rawBytes, ContentType: "application/zip"}
+	persistentBrowser.hasDownloadResult = true
+	connector := newFakePersistentConnector(map[string]*fakePersistentBrowser{"ws://owned-browser": persistentBrowser})
+	service := NewPersistentService(PersistentServiceOptions{StateDirs: stateDirs, Connector: connector})
+	writeTestState(t, stateDirs.Local, map[string]any{
+		"debug_url":      "ws://owned-browser",
+		"owned":          true,
+		"active_page_id": "page-2",
+	})
+	downloadPath := filepath.Join(t.TempDir(), "archive.zip")
+
+	download, err := service.Download(ctx, DownloadRequest{Selector: "#archive", Path: downloadPath})
+	if err != nil {
+		t.Fatalf("PersistentService.Download(raw bytes) error = %v, want nil", err)
+	}
+	written, err := os.ReadFile(downloadPath) //nolint:gosec // Test path is controlled under t.TempDir.
+	if err != nil {
+		t.Fatalf("read requested download path: %v", err)
+	}
+	if !bytes.Equal(written, rawBytes) {
+		t.Fatalf("downloaded bytes = %q, want %q", written, rawBytes)
+	}
+	if download.Path != downloadPath {
+		t.Fatalf("Download(raw bytes) path = %q, want %q", download.Path, downloadPath)
+	}
+	if download.Bytes != int64(len(rawBytes)) {
+		t.Fatalf("Download(raw bytes) bytes = %#v, want %d", download.Bytes, len(rawBytes))
+	}
+	if download.ContentType != "application/zip" {
+		t.Fatalf("Download(raw bytes) content type = %q, want application/zip", download.ContentType)
+	}
+
+	wantDownloads := []DownloadRequest{{PageID: "page-2", Selector: "#archive", Path: downloadPath}}
 	if !reflect.DeepEqual(persistentBrowser.downloads, wantDownloads) {
 		t.Fatalf("download requests = %#v, want %#v", persistentBrowser.downloads, wantDownloads)
 	}
@@ -614,12 +660,14 @@ func (connector *fakePersistentConnector) ConnectBrowser(ctx context.Context, de
 }
 
 type fakePersistentBrowser struct {
-	pages     []PageInfo
-	tree      AccessibilityTree
-	challenge ManualChallengeResult
-	actions   []persistentBrowserAction
-	downloads []DownloadRequest
-	closed    bool
+	pages             []PageInfo
+	tree              AccessibilityTree
+	challenge         ManualChallengeResult
+	actions           []persistentBrowserAction
+	downloads         []DownloadRequest
+	downloadResult    CapturedDownload
+	hasDownloadResult bool
+	closed            bool
 }
 
 type persistentBrowserAction struct {
@@ -729,6 +777,9 @@ func (browser *fakePersistentBrowser) DetectManualChallenge(
 func (browser *fakePersistentBrowser) Download(_ context.Context, request DownloadRequest) (CapturedDownload, error) {
 	request.PageID = browser.selectedPageID(request.PageID)
 	browser.downloads = append(browser.downloads, request)
+	if browser.hasDownloadResult {
+		return browser.downloadResult, nil
+	}
 	return CapturedDownload{Path: request.Path, Bytes: int64(11), ContentType: "application/zip"}, nil
 }
 

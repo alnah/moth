@@ -354,7 +354,21 @@ func (service *PersistentService) Download(ctx context.Context, request Download
 		return CapturedDownload{}, errors.New("persistent browser does not support downloads")
 	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
-	return downloader.Download(ctx, request)
+	captured, err := downloader.Download(ctx, request)
+	if err != nil {
+		return CapturedDownload{}, err
+	}
+	if captured.Path == request.Path {
+		return captured, nil
+	}
+	data, err := downloadBytes(captured.Bytes)
+	if err != nil {
+		return CapturedDownload{}, err
+	}
+	if err := writeBrowserFile(request.Path, data, "download"); err != nil {
+		return CapturedDownload{}, err
+	}
+	return CapturedDownload{Path: request.Path, Bytes: int64(len(data)), ContentType: captured.ContentType}, nil
 }
 
 // ResponseMetadata delegates URL-scoped metadata capture to the stateless browser service.
