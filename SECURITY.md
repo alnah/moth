@@ -31,8 +31,6 @@ Include:
   tools, config loading, output rendering, release artifacts, checksums, or CI
   workflows.
 
-I aim to acknowledge reports within 7 days.
-
 ## Scope
 
 Report issues such as:
