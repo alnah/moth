@@ -138,7 +138,7 @@ func (client *Client) collectPages(
 	users := make(map[string]xUser)
 	metadata := map[string]any(nil)
 
-	for requestNumber := 0; requestNumber < maxRequests; requestNumber++ {
+	for requestNumber := range maxRequests {
 		var response xPostListResponse
 		pageMetadata, err := client.get(ctx, operation, path, query, &response)
 		if err != nil {

@@ -80,7 +80,7 @@ func (client *Client) Do(req *http.Request) (*http.Response, error) {
 	attempts := client.policy.attempts
 	var lastErr error
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		attemptNumber := attempt + 1
 		attemptReq, err := requestForAttempt(req, attempt)
 		if err != nil {

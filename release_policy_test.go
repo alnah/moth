@@ -131,7 +131,7 @@ func releaseWorkflowTagPatterns(text string) []string {
 	inTags := false
 	tagsIndent := -1
 
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		trimmedLine := strings.TrimSpace(line)
 		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "#") {
 			continue
@@ -141,8 +141,8 @@ func releaseWorkflowTagPatterns(text string) []string {
 		if inTags {
 			if indent <= tagsIndent && !strings.HasPrefix(trimmedLine, "- ") {
 				inTags = false
-			} else if strings.HasPrefix(trimmedLine, "- ") {
-				patterns = append(patterns, unquoteYAMLListValue(strings.TrimPrefix(trimmedLine, "- ")))
+			} else if after, ok := strings.CutPrefix(trimmedLine, "- "); ok {
+				patterns = append(patterns, unquoteYAMLListValue(after))
 				continue
 			}
 		}

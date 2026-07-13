@@ -477,7 +477,7 @@ func assertQueryValue(t *testing.T, got string, want string, name string) {
 func assertQueryContains(t *testing.T, got string, want string, name string) {
 	t.Helper()
 
-	for _, part := range strings.Split(got, ",") {
+	for part := range strings.SplitSeq(got, ",") {
 		if strings.TrimSpace(part) == want {
 			return
 		}
