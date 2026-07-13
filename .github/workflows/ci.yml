@@ -74,6 +74,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check go fix
+        run: make fix-check
+
       - name: Verify golangci-lint config
         run: go tool golangci-lint config verify
 
