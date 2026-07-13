@@ -87,9 +87,11 @@
 - Testing: all tests always pass, include race detector when applicable.
 - Lint: always lint with `go vet ./...` and `go tool golangci-lint run`; then fix.
 - Format: always format with `gofmt`; then fix imports with `goimports -local github.com/alnah/moth`.
+- Modernize: always check `go fix -diff ./...`; apply safe fixes atomically.
 - Scripts:
   - `gofmt -w .`
   - `goimports -w -local github.com/alnah/moth .`
+  - `go fix -diff ./...`
   - `go test ./...`
   - `go test -race ./...`
   - `go test -cover ./...`

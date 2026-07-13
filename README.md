@@ -283,6 +283,8 @@ Common targets:
 
 ```sh
 make fmt              # format Go files and imports
+make fix              # apply Go modernizer fixes
+make fix-check        # check for pending Go modernizer fixes
 make lint             # run golangci-lint
 make test             # run tests
 make test-race        # run race tests
