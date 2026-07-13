@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -89,12 +90,7 @@ func (pool *Pool) reservePinnedWorker(worker Worker) (Worker, <-chan struct{}, e
 }
 
 func (pool *Pool) knowsWorkerLocked(worker Worker) bool {
-	for _, knownWorker := range pool.workers {
-		if knownWorker == worker {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(pool.workers, worker)
 }
 
 func (pool *Pool) removeSessionIfEmpty(ctx context.Context, key string, session *poolSession) error {

@@ -1,6 +1,9 @@
 package x
 
-import "net/http"
+import (
+	"maps"
+	"net/http"
+)
 
 func rateLimitMetadata(header http.Header) map[string]any {
 	metadata := make(map[string]any)
@@ -34,9 +37,7 @@ func mergeMetadata(left map[string]any, right map[string]any) map[string]any {
 	if left == nil {
 		left = make(map[string]any, len(right))
 	}
-	for key, value := range right {
-		left[key] = value
-	}
+	maps.Copy(left, right)
 
 	return left
 }

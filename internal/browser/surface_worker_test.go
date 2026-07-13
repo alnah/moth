@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -59,12 +60,7 @@ func assertSurfaceActions(t *testing.T, got []surfaceAction, want []surfaceActio
 }
 
 func hasWarning(warnings []content.Warning, want content.Warning) bool {
-	for _, warning := range warnings {
-		if warning == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(warnings, want)
 }
 
 type surfaceAction struct {
