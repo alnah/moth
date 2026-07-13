@@ -542,7 +542,7 @@ type persistentBrowserState struct {
 	Owned        bool      `json:"owned"`
 	DataDir      string    `json:"data_dir,omitempty"`
 	ActivePageID string    `json:"active_page_id,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (state persistentBrowserState) status(status string) BrowserStatus {
