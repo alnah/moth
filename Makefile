@@ -14,7 +14,7 @@ help: ## Show available targets.
 quick: fmt-check lint test build ## Run fast local checks.
 
 .PHONY: check
-check: actionlint mod-check fmt-check lint vet build goreleaser-check test test-race cover govulncheck ## Run CI-equivalent checks.
+check: actionlint mod-check fmt-check fix-check lint vet build goreleaser-check test test-race cover govulncheck ## Run CI-equivalent checks.
 
 .PHONY: ci
 ci: check test-browser cover-browser ## Run all required CI checks, including browser-tag checks.
@@ -29,6 +29,16 @@ fmt-check: ## Check Go formatting and imports.
 	@test -z "$$($(GO)fmt -l .)"
 	@output="$$($(GO) tool goimports -l -local $(GOIMPORTS_LOCAL) .)"; \
 	if [ -n "$$output" ]; then printf '%s\n' "$$output"; exit 1; fi
+
+.PHONY: fix
+fix: ## Apply Go modernizer fixes.
+	$(GO) fix ./...
+	$(GO)fmt -w .
+	$(GO) tool goimports -w -local $(GOIMPORTS_LOCAL) .
+
+.PHONY: fix-check
+fix-check: ## Check whether Go modernizer fixes are pending.
+	$(GO) fix -diff ./...
 
 .PHONY: mod-check
 mod-check: ## Check go.mod and go.sum are tidy.
