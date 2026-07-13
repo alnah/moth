@@ -1,6 +1,6 @@
 module github.com/alnah/moth
 
-go 1.26.2
+go 1.26.5
 
 require (
 	github.com/go-rod/rod v0.116.2
