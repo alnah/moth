@@ -14,6 +14,11 @@ import (
 	"github.com/alnah/moth/internal/browser"
 )
 
+const (
+	defaultReadHeaderTimeout = 5 * time.Second
+	defaultIdleTimeout       = 60 * time.Second
+)
+
 type daemonProcess struct {
 	runtimeDir     string
 	lock           *runtimeLock
@@ -88,18 +93,8 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		Pool:      pool,
 	})
 	daemon.server = server
-	// Canceling the base context stops active handlers during shutdown.
-	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	httpServer, cancelRequests := newDaemonHTTPServer(server.Handler())
 	daemon.cancelRequests = cancelRequests
-	httpServer := &http.Server{
-		Handler:           server.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		BaseContext: func(net.Listener) context.Context {
-			return requestCtx
-		},
-	}
-	httpServer.RegisterOnShutdown(cancelRequests)
 
 	runtime := Runtime{
 		Version:   options.Version,
@@ -121,6 +116,22 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 
 	cleanup = false
 	return daemon, nil
+}
+
+// newDaemonHTTPServer builds the daemon HTTP server and cancels active
+// requests when shutdown starts.
+func newDaemonHTTPServer(handler http.Handler) (*http.Server, context.CancelFunc) {
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	httpServer := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: defaultReadHeaderTimeout,
+		IdleTimeout:       defaultIdleTimeout,
+		BaseContext: func(net.Listener) context.Context {
+			return requestCtx
+		},
+	}
+	httpServer.RegisterOnShutdown(cancelRequests)
+	return httpServer, cancelRequests
 }
 
 func (daemon *daemonProcess) wait(ctx context.Context) error {
