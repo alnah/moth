@@ -118,6 +118,70 @@ func TestDefaultLogPath(t *testing.T) {
 	}
 }
 
+func TestDaemonWaitReturnsServeError(t *testing.T) {
+	server := NewServer(ServerOptions{Version: "v1", Token: "token"})
+	daemon := &daemonProcess{
+		server:   server,
+		serveErr: make(chan error, 1),
+	}
+	serveErr := errors.New("serve exploded")
+	daemon.serveErr <- serveErr
+
+	err := daemon.wait(context.Background())
+	if !errors.Is(err, serveErr) {
+		t.Fatalf("wait() error = %v, want serve error", err)
+	}
+}
+
+func TestStatusRecorderPropagatesWriteError(t *testing.T) {
+	writeErr := errors.New("write failed")
+	recorder := &statusRecorder{ResponseWriter: &failingResponseWriter{err: writeErr}}
+
+	if _, err := recorder.Write([]byte("body")); !errors.Is(err, writeErr) {
+		t.Fatalf("Write() error = %v, want write error", err)
+	}
+	if recorder.statusCode() != http.StatusOK {
+		t.Fatalf("statusCode = %d, want %d", recorder.statusCode(), http.StatusOK)
+	}
+}
+
+type failingResponseWriter struct {
+	err error
+}
+
+func (writer *failingResponseWriter) Header() http.Header {
+	return make(http.Header)
+}
+
+func (writer *failingResponseWriter) WriteHeader(int) {}
+
+func (writer *failingResponseWriter) Write([]byte) (int, error) {
+	return 0, writer.err
+}
+
+func TestStatusRecorderDefaultsAndUnwrap(t *testing.T) {
+	raw := httptest.NewRecorder()
+	recorder := &statusRecorder{ResponseWriter: raw}
+	if recorder.Unwrap() != raw {
+		t.Fatal("statusRecorder.Unwrap() returned another writer")
+	}
+	if recorder.statusCode() != http.StatusOK {
+		t.Fatalf("statusCode before write = %d, want %d", recorder.statusCode(), http.StatusOK)
+	}
+
+	recorder.WriteHeader(http.StatusCreated)
+	recorder.WriteHeader(http.StatusInternalServerError)
+	if recorder.statusCode() != http.StatusCreated {
+		t.Fatalf("statusCode after double WriteHeader = %d, want %d", recorder.statusCode(), http.StatusCreated)
+	}
+	if _, err := recorder.Write([]byte("body")); err != nil {
+		t.Fatalf("Write() error = %v, want nil", err)
+	}
+	if recorder.bytes != 4 {
+		t.Fatalf("statusRecorder bytes = %d, want 4", recorder.bytes)
+	}
+}
+
 func TestServerShutdownRequestsStop(t *testing.T) {
 	server := NewServer(ServerOptions{Version: "v1", Token: "token"})
 	if err := server.Shutdown(context.Background()); err != nil {

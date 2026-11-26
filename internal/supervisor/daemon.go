@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -31,6 +32,7 @@ type daemonProcess struct {
 	serveErr       chan error
 	cancelRequests context.CancelFunc
 	cancelReaper   context.CancelFunc
+	logFile        *LogFile
 }
 
 // Run starts a daemon and blocks until its context or a shutdown request.
@@ -63,8 +65,17 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		return nil, err
 	}
 
+	logFile, logger, err := openDaemonLogger(options)
+	if err != nil {
+		_ = runtimeLock.Close()
+		return nil, err
+	}
+
 	listener, network, address, err := listen(ctx, runtimeDir)
 	if err != nil {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
 		_ = runtimeLock.Close()
 		return nil, err
 	}
@@ -73,6 +84,7 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		runtimeDir: runtimeDir,
 		lock:       runtimeLock,
 		listener:   listener,
+		logFile:    logFile,
 	}
 	cleanup := true
 	defer func() {
@@ -95,7 +107,7 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		Token:      token,
 		StartedAt:  startedAt,
 		Lifecycle:  options.Lifecycle,
-		Logger:     options.Logger,
+		Logger:     logger,
 		Pool:       pool,
 		BrowserBin: options.BrowserBin,
 	})
@@ -113,6 +125,13 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 	}
 	if err := writeRuntime(runtimeDir, runtime); err != nil {
 		return nil, err
+	}
+	if logger != nil {
+		logger.Info("daemon started",
+			"runtime_dir", runtimeDir,
+			"network", network,
+			"address", address,
+		)
 	}
 
 	daemon.httpServer = httpServer
@@ -154,13 +173,21 @@ func newDaemonHTTPServer(handler http.Handler) (*http.Server, context.CancelFunc
 }
 
 func (daemon *daemonProcess) wait(ctx context.Context) error {
+	reason := "shutdown"
+	var serveErr error
 	select {
 	case <-ctx.Done():
+		reason = "context"
 	case <-daemon.server.done():
 	case err := <-daemon.serveErr:
 		if !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("serve daemon: %w", err)
+			reason = "serve_error"
+			serveErr = fmt.Errorf("serve daemon: %w", err)
 		}
+	}
+	daemon.server.logger.Info("daemon stopping", "reason", reason)
+	if serveErr != nil {
+		return serveErr
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultServerTimeout)
@@ -181,10 +208,11 @@ func (daemon *daemonProcess) close() error {
 	var closeErr error
 	if daemon.server != nil {
 		closeErr = daemon.server.Close()
+		daemon.server.logger.Info("daemon stopped")
 	}
 	// Publish the stopped state only after browser resources are closed.
 	removeRuntime(daemon.runtimeDir)
-	daemon.closeResources()
+	closeErr = errors.Join(closeErr, daemon.closeResources())
 	return closeErr
 }
 
@@ -204,7 +232,7 @@ func (daemon *daemonProcess) reapLoop(ctx context.Context, interval time.Duratio
 				daemon.server.logger.Warn("reap browser lifecycle", "error", err)
 			}
 			if report.ClosedPages != 0 || report.ClosedSessions != 0 || report.ClosedBrowsers != 0 {
-				daemon.server.logger.Debug("reaped browser lifecycle",
+				daemon.server.logger.Info("reaped browser lifecycle",
 					"pages", report.ClosedPages,
 					"sessions", report.ClosedSessions,
 					"browsers", report.ClosedBrowsers,
@@ -218,13 +246,24 @@ func (daemon *daemonProcess) reapLoop(ctx context.Context, interval time.Duratio
 	}
 }
 
-func (daemon *daemonProcess) closeResources() {
+func (daemon *daemonProcess) closeResources() error {
+	var errs []error
 	if daemon.listener != nil {
-		_ = daemon.listener.Close()
+		if err := daemon.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, err)
+		}
 	}
 	if daemon.lock != nil {
-		_ = daemon.lock.Close()
+		if err := daemon.lock.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	if daemon.logFile != nil {
+		if err := daemon.logFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // DefaultRuntimeDir returns the per-user daemon runtime directory.
@@ -233,9 +272,24 @@ func DefaultRuntimeDir() string {
 }
 
 func defaultRuntimeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = os.TempDir()
+	return filepath.Join(defaultMothDir(), "run")
+}
+
+func openDaemonLogger(options RunOptions) (*LogFile, *slog.Logger, error) {
+	if options.Logger != nil {
+		return nil, options.Logger, nil
 	}
-	return filepath.Join(home, ".moth", "run")
+	logPath := strings.TrimSpace(options.LogPath)
+	if logPath == "" {
+		return nil, nil, nil
+	}
+	logFile, err := OpenLogFile(logPath, options.LogMaxBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open daemon log: %w", err)
+	}
+	logger := logFile.Logger().With(
+		"pid", os.Getpid(),
+		"version", options.Version,
+	)
+	return logFile, logger, nil
 }

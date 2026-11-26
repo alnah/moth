@@ -15,6 +15,8 @@ const (
 	runtimeFileName = "daemon.json"
 	socketFileName  = "moth.sock"
 	lockFileName    = "daemon.lock"
+	logDirName      = "log"
+	logFileName     = "daemon.log"
 )
 
 // RuntimePath returns the daemon runtime file inside runtimeDir.
@@ -42,6 +44,19 @@ func ReadRuntime(runtimeDir string) (Runtime, error) {
 		return Runtime{}, errors.New("runtime file missing address or token")
 	}
 	return runtime, nil
+}
+
+// DefaultLogPath returns the per-user daemon log path.
+func DefaultLogPath() string {
+	return filepath.Join(defaultMothDir(), logDirName, logFileName)
+}
+
+func defaultMothDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.TempDir()
+	}
+	return filepath.Join(home, ".moth")
 }
 
 func writeRuntime(runtimeDir string, runtime Runtime) error {

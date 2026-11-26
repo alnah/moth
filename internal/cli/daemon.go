@@ -62,6 +62,7 @@ func newDaemonRunCommand(rootOptions *rootFlags, daemonOptions *daemonFlags) *co
 				RuntimeDir: daemonOptions.runtimeDir(),
 				Version:    version,
 				BrowserBin: daemonBrowserBin(browserBin, rootOptions),
+				LogPath:    supervisor.DefaultLogPath(),
 			})
 		},
 	}

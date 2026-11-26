@@ -183,6 +183,21 @@ func (server *Server) requestShutdown() {
 }
 
 func (server *Server) handleCall(writer http.ResponseWriter, request *http.Request) {
+	recorder := &statusRecorder{ResponseWriter: writer}
+	writer = recorder
+	started := server.clock()
+	var call Call
+	errorCode := ""
+	defer func() {
+		server.logger.Info("daemon call",
+			"method", logMethod(call.Method),
+			"status", recorder.statusCode(),
+			"bytes", recorder.bytes,
+			"duration_ms", server.clock().Sub(started).Milliseconds(),
+			"error_code", errorCode,
+		)
+	}()
+
 	server.beginCall()
 	defer server.endCall()
 	if request.Method != http.MethodPost {
@@ -191,6 +206,7 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	if !server.authorized(request) {
+		errorCode = CodeUnauthorized
 		writeReply(writer, http.StatusUnauthorized, Reply{
 			Error: &CallError{
 				Code:    CodeUnauthorized,
@@ -203,8 +219,8 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 	body := http.MaxBytesReader(writer, request.Body, maxRequestBody)
 	defer func() { _ = body.Close() }()
 
-	var call Call
 	if err := json.NewDecoder(body).Decode(&call); err != nil {
+		errorCode = CodeProtocolError
 		status := http.StatusBadRequest
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			status = http.StatusRequestEntityTooLarge
@@ -218,6 +234,7 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	if strings.TrimSpace(call.Method) == "" {
+		errorCode = CodeProtocolError
 		writeReply(writer, http.StatusBadRequest, Reply{
 			Error: &CallError{
 				Code:    CodeProtocolError,
@@ -240,6 +257,7 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		case errors.Is(err, browser.ErrBrowserStateUnavailable):
 			code = CodeBrowserStateUnavailable
 		}
+		errorCode = code
 		writeReply(writer, http.StatusOK, Reply{
 			Error: &CallError{
 				Code:    code,
@@ -249,6 +267,49 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeReply(writer, http.StatusOK, Reply{Result: result})
+}
+
+const maxLoggedMethodBytes = 64
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+}
+
+func (recorder *statusRecorder) WriteHeader(status int) {
+	if recorder.status != 0 {
+		return
+	}
+	recorder.status = status
+	recorder.ResponseWriter.WriteHeader(status)
+}
+
+func (recorder *statusRecorder) Write(data []byte) (int, error) {
+	if recorder.status == 0 {
+		recorder.WriteHeader(http.StatusOK)
+	}
+	n, err := recorder.ResponseWriter.Write(data)
+	recorder.bytes += int64(n)
+	return n, err
+}
+
+func (recorder *statusRecorder) Unwrap() http.ResponseWriter {
+	return recorder.ResponseWriter
+}
+
+func (recorder *statusRecorder) statusCode() int {
+	if recorder.status == 0 {
+		return http.StatusOK
+	}
+	return recorder.status
+}
+
+func logMethod(method string) string {
+	if len(method) <= maxLoggedMethodBytes {
+		return method
+	}
+	return method[:maxLoggedMethodBytes]
 }
 
 func (server *Server) authorized(request *http.Request) bool {

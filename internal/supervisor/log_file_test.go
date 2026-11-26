@@ -25,14 +25,14 @@ func TestOpenLogFileCreatesPrivateJSONLog(t *testing.T) {
 	}
 
 	logFile.Logger().Info("daemon started", "answer", 42)
-	if err := logFile.Close(); err != nil {
-		t.Fatalf("Close() error = %v, want nil", err)
+	if closeErr := logFile.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v, want nil", closeErr)
 	}
 
 	assertLogFilePerm(t, filepath.Dir(path), 0o700)
 	assertLogFilePerm(t, path, 0o600)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Test path is temporary.
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}
@@ -73,6 +73,54 @@ func TestOpenLogFileRejectsRelativePath(t *testing.T) {
 	}
 }
 
+func TestOpenLogFileSecuresExistingFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "log")
+	//nolint:gosec // Test starts with a permissive directory to verify tightening.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create log directory: %v", err)
+	}
+	path := filepath.Join(dir, "daemon.log")
+	//nolint:gosec // Test starts with a permissive file to verify tightening.
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write existing log: %v", err)
+	}
+
+	logFile, err := OpenLogFile(path, 0)
+	if err != nil {
+		t.Fatalf("OpenLogFile() error = %v, want nil", err)
+	}
+	logFile.Logger().Info("new")
+	if closeErr := logFile.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v, want nil", closeErr)
+	}
+
+	assertLogFilePerm(t, dir, 0o700)
+	assertLogFilePerm(t, path, 0o600)
+	data, err := os.ReadFile(path) //nolint:gosec // Test path is temporary.
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if !bytes.Contains(data, []byte("old\n")) || !bytes.Contains(data, []byte(`"msg":"new"`)) {
+		t.Fatalf("log file did not preserve and append: %q", data)
+	}
+}
+
+func TestOpenLogFileRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.log")
+	if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	path := filepath.Join(dir, "daemon.log")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	if _, err := OpenLogFile(path, 0); err == nil {
+		t.Fatal("OpenLogFile(symlink) error = nil, want error")
+	}
+}
+
 func TestOpenLogFileRejectsNonRegularPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log", "daemon.log")
 	if err := os.MkdirAll(path, 0o700); err != nil {
@@ -99,8 +147,8 @@ func TestOpenLogFileRotatesSingleBackup(t *testing.T) {
 			"padding", strings.Repeat("x", 48),
 		)
 	}
-	if err := logFile.Close(); err != nil {
-		t.Fatalf("Close() error = %v, want nil", err)
+	if closeErr := logFile.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v, want nil", closeErr)
 	}
 
 	currentInfo, err := os.Stat(path)
@@ -150,12 +198,13 @@ func TestOpenLogFileKeepsWritingWhenRotationFails(t *testing.T) {
 	defer func() { _ = logFile.Close() }()
 
 	first := []byte(strings.Repeat("a", 100))
-	if n, err := logFile.writer.Write(first); err != nil || n != len(first) {
-		t.Fatalf("first Write() = %d, %v, want %d, nil", n, err, len(first))
+	n, writeErr := logFile.writer.Write(first)
+	if writeErr != nil || n != len(first) {
+		t.Fatalf("first Write() = %d, %v, want %d, nil", n, writeErr, len(first))
 	}
 
 	second := []byte("second\n")
-	n, err := logFile.writer.Write(second)
+	n, err = logFile.writer.Write(second)
 	if n != len(second) {
 		t.Fatalf("second Write() count = %d, want %d", n, len(second))
 	}
@@ -163,12 +212,67 @@ func TestOpenLogFileKeepsWritingWhenRotationFails(t *testing.T) {
 		t.Fatal("second Write() error = nil, want rotation error")
 	}
 
-	data, readErr := os.ReadFile(path)
+	data, readErr := os.ReadFile(path) //nolint:gosec // Test path is temporary.
 	if readErr != nil {
 		t.Fatalf("read current log: %v", readErr)
 	}
 	if !bytes.Contains(data, first) || !bytes.Contains(data, second) {
 		t.Fatalf("current log lost writes after rotation failure: %q", data)
+	}
+}
+
+func TestOpenLogFileRecoversWhenRenameFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+
+	dir := filepath.Join(t.TempDir(), "log")
+	path := filepath.Join(dir, "daemon.log")
+	logFile, err := OpenLogFile(path, 64)
+	if err != nil {
+		t.Fatalf("OpenLogFile() error = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o700) //nolint:gosec // Test restores the owner-only directory.
+		_ = logFile.Close()
+	})
+
+	first := []byte(strings.Repeat("a", 100))
+	if n, writeErr := logFile.writer.Write(first); writeErr != nil || n != len(first) {
+		t.Fatalf("first Write() = %d, %v, want %d, nil", n, writeErr, len(first))
+	}
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // Test removes owner write permission.
+		t.Fatalf("make log directory read-only: %v", err)
+	}
+
+	second := []byte("second\n")
+	n, writeErr := logFile.writer.Write(second)
+	if n != len(second) {
+		t.Fatalf("second Write() count = %d, want %d", n, len(second))
+	}
+	if writeErr == nil {
+		t.Fatal("second Write() error = nil, want rotation error")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // Test restores the owner-only directory.
+		t.Fatalf("restore log directory: %v", err)
+	}
+
+	data, readErr := os.ReadFile(path) //nolint:gosec // Test path is temporary.
+	if readErr != nil {
+		t.Fatalf("read current log: %v", readErr)
+	}
+	if !bytes.Contains(data, first) || !bytes.Contains(data, second) {
+		t.Fatalf("current log lost writes after rename failure: %q", data)
+	}
+}
+
+func TestLogFileNilReceiver(t *testing.T) {
+	var logFile *LogFile
+	if logFile.Logger() != nil {
+		t.Fatal("nil LogFile.Logger() != nil")
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatalf("nil LogFile.Close() error = %v, want nil", err)
 	}
 }
 

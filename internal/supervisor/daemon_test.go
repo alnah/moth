@@ -113,7 +113,7 @@ func TestRunWithCanceledContextDoesNotLeaveRuntime(t *testing.T) {
 func TestDaemonWritesStartAndStopLogs(t *testing.T) {
 	runtimeDir := newRuntimeDir(t)
 	logPath := filepath.Join(t.TempDir(), "log", "daemon.log")
-	daemon := startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
+	daemon := startDaemonWithOptions(t, runtimeDir, supervisor.RunOptions{
 		LogPath: logPath,
 	})
 	runtime := readRuntime(t, runtimeDir)
@@ -129,7 +129,7 @@ func TestDaemonWritesStartAndStopLogs(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(logPath)
+	data, err := os.ReadFile(logPath) //nolint:gosec // Test path is temporary.
 	if err != nil {
 		t.Fatalf("read daemon log: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestDaemonCustomLoggerWinsOverLogPath(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	runtimeDir := newRuntimeDir(t)
 	logPath := filepath.Join(t.TempDir(), "log", "daemon.log")
-	daemon := startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
+	daemon := startDaemonWithOptions(t, runtimeDir, supervisor.RunOptions{
 		Logger:  logger,
 		LogPath: logPath,
 	})
@@ -188,7 +188,7 @@ func TestDaemonCustomLoggerWinsOverLogPath(t *testing.T) {
 func daemonLogMessages(t *testing.T, path string) map[string]bool {
 	t.Helper()
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Test path is temporary.
 	if err != nil {
 		t.Fatalf("read daemon log: %v", err)
 	}

@@ -141,6 +141,8 @@ type RunOptions struct {
 	ReapInterval time.Duration
 	Lifecycle    browser.LifecycleOptions
 	Logger       *slog.Logger
+	LogPath      string
+	LogMaxBytes  int64
 	Pool         *browser.Pool
 }
 
