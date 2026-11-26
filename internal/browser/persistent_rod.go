@@ -36,17 +36,9 @@ func (rodPersistentLauncher) LaunchBrowser(ctx context.Context, request LaunchRe
 }
 
 func newRodPersistentChromeLauncher(ctx context.Context, request LaunchRequest, browserBin string) *launcher.Launcher {
-	browserLauncher := launcher.New().
-		Context(ctx).
-		Headless(!request.Show).
-		Leakless(true).
+	browserLauncher := newLeaklessChromeLauncher(ctx, !request.Show).
 		UserDataDir(request.DataDir)
-	if browserBin != "" {
-		browserLauncher = browserLauncher.Bin(browserBin)
-	}
-	if request.NoSandbox || os.Getenv("ROD_NO_SANDBOX") == "1" {
-		browserLauncher = browserLauncher.NoSandbox(true)
-	}
+	applyChromeLauncherOptions(browserLauncher, browserBin, request.NoSandbox)
 	return browserLauncher
 }
 

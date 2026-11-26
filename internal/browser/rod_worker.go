@@ -67,17 +67,9 @@ func newRodWorker(ctx context.Context, config poolConfig) (*rodWorker, error) {
 }
 
 func newRodChromeLauncher(ctx context.Context, config poolConfig, browserBin string) *launcher.Launcher {
-	browserLauncher := launcher.New().
-		Context(ctx).
-		Headless(config.headless).
-		Leakless(true).
+	browserLauncher := newLeaklessChromeLauncher(ctx, config.headless).
 		Set(flags.Flag("disable-gpu"))
-	if browserBin != "" {
-		browserLauncher = browserLauncher.Bin(browserBin)
-	}
-	if config.noSandbox || os.Getenv("ROD_NO_SANDBOX") == "1" {
-		browserLauncher = browserLauncher.NoSandbox(true)
-	}
+	applyChromeLauncherOptions(browserLauncher, browserBin, config.noSandbox)
 	if config.proxyURL != "" {
 		browserLauncher = browserLauncher.Proxy(config.proxyURL)
 	}
