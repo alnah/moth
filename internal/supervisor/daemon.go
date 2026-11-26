@@ -15,12 +15,13 @@ import (
 )
 
 type daemonProcess struct {
-	runtimeDir string
-	lock       *runtimeLock
-	listener   net.Listener
-	httpServer *http.Server
-	server     *Server
-	serveErr   chan error
+	runtimeDir     string
+	lock           *runtimeLock
+	listener       net.Listener
+	httpServer     *http.Server
+	server         *Server
+	serveErr       chan error
+	cancelRequests context.CancelFunc
 }
 
 // Run starts a daemon and blocks until its context or a shutdown request.
@@ -87,11 +88,18 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		Pool:      pool,
 	})
 	daemon.server = server
+	// Canceling the base context stops active handlers during shutdown.
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	daemon.cancelRequests = cancelRequests
 	httpServer := &http.Server{
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		BaseContext: func(net.Listener) context.Context {
+			return requestCtx
+		},
 	}
+	httpServer.RegisterOnShutdown(cancelRequests)
 
 	runtime := Runtime{
 		Version:   options.Version,
@@ -134,11 +142,15 @@ func (daemon *daemonProcess) wait(ctx context.Context) error {
 }
 
 func (daemon *daemonProcess) close() error {
-	removeRuntime(daemon.runtimeDir)
+	if daemon.cancelRequests != nil {
+		daemon.cancelRequests()
+	}
 	var closeErr error
 	if daemon.server != nil {
 		closeErr = daemon.server.Close()
 	}
+	// Publish the stopped state only after browser resources are closed.
+	removeRuntime(daemon.runtimeDir)
 	daemon.closeResources()
 	return closeErr
 }
