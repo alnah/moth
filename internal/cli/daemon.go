@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,18 @@ type daemonFlags struct {
 }
 
 var runDaemon = supervisor.Run
+
+var daemonErrorMappings = []struct {
+	err  error
+	code string
+}{
+	{err: supervisor.ErrDaemonUnavailable, code: "daemon_unavailable"},
+	{err: supervisor.ErrDaemonVersion, code: "daemon_version_mismatch"},
+	{err: supervisor.ErrDaemonAuth, code: "daemon_unauthorized"},
+	{err: supervisor.ErrDaemonProtocol, code: "daemon_protocol_error"},
+	{err: supervisor.ErrDaemonMethod, code: "daemon_method_failed"},
+	{err: supervisor.ErrDaemonAlreadyRunning, code: "daemon_already_running"},
+}
 
 func addDaemonCommand(root *cobra.Command, rootOptions *rootFlags) {
 	flags := &daemonFlags{}
@@ -44,14 +57,14 @@ func newDaemonRunCommand(rootOptions *rootFlags, daemonOptions *daemonFlags) *co
 				return newInvalidArgumentsError(errors.New("daemon run accepts no positional arguments"))
 			}
 			return runDaemon(cmd.Context(), supervisor.RunOptions{
-				RuntimeDir: daemonRuntimeDir(daemonOptions),
+				RuntimeDir: daemonOptions.runtimeDir(),
 				Version:    version,
 				BrowserBin: daemonBrowserBin(browserBin, rootOptions),
 			})
 		},
 	}
 	cmd.Flags().StringVar(&browserBin, "browser-bin", "", "browser binary path")
-	cmd.Annotations = map[string]string{"moth.no_dependencies": "true"}
+	markCommandWithoutDependencies(cmd)
 	return cmd
 }
 
@@ -64,31 +77,13 @@ func newDaemonStatusCommand(rootOptions *rootFlags, daemonOptions *daemonFlags) 
 				return newInvalidArgumentsError(errors.New("daemon status accepts no positional arguments"))
 			}
 
-			runtimeDir := daemonRuntimeDir(daemonOptions)
-			_, readErr := supervisor.ReadRuntime(runtimeDir)
-			if errors.Is(readErr, os.ErrNotExist) {
-				return renderResult(cmd, rootOptions.Output, daemonStatusResult("missing", nil))
-			}
-			if readErr != nil {
-				return renderResult(cmd, rootOptions.Output, daemonStatusResult("stale", nil))
-			}
-
 			ctx, cancel := commandContext(cmd, rootOptions)
 			defer cancel()
-			client := supervisor.NewClient(supervisor.ClientOptions{
-				RuntimeDir: runtimeDir,
-				Version:    version,
-			})
-			defer func() { _ = client.Close() }()
-
-			health, err := client.Health(ctx)
-			if err != nil {
-				return renderResult(cmd, rootOptions.Output, daemonStatusResult("stale", nil))
-			}
-			return renderResult(cmd, rootOptions.Output, daemonStatusResult("running", &health))
+			status, health := inspectDaemon(ctx, daemonOptions.runtimeDir())
+			return renderResult(cmd, rootOptions.Output, daemonStatusResult(status, health))
 		},
 	}
-	cmd.Annotations = map[string]string{"moth.no_dependencies": "true"}
+	markCommandWithoutDependencies(cmd)
 	return cmd
 }
 
@@ -103,10 +98,7 @@ func newDaemonStopCommand(rootOptions *rootFlags, daemonOptions *daemonFlags) *c
 
 			ctx, cancel := commandContext(cmd, rootOptions)
 			defer cancel()
-			client := supervisor.NewClient(supervisor.ClientOptions{
-				RuntimeDir: daemonRuntimeDir(daemonOptions),
-				Version:    version,
-			})
+			client := daemonOptions.client()
 			defer func() { _ = client.Close() }()
 
 			if err := client.Shutdown(ctx); err != nil {
@@ -115,17 +107,56 @@ func newDaemonStopCommand(rootOptions *rootFlags, daemonOptions *daemonFlags) *c
 			return renderResult(cmd, rootOptions.Output, daemonStatusResult("stopped", nil))
 		},
 	}
-	cmd.Annotations = map[string]string{"moth.no_dependencies": "true"}
+	markCommandWithoutDependencies(cmd)
 	return cmd
 }
 
-func daemonRuntimeDir(flags *daemonFlags) string {
-	if flags != nil {
-		if runtimeDir := strings.TrimSpace(flags.RuntimeDir); runtimeDir != "" {
-			return runtimeDir
-		}
+func inspectDaemon(ctx context.Context, runtimeDir string) (string, *supervisor.Health) {
+	_, err := supervisor.ReadRuntime(runtimeDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "stale", nil
+	}
+
+	client := supervisor.NewClient(supervisor.ClientOptions{
+		RuntimeDir: runtimeDir,
+		Version:    version,
+	})
+	defer func() { _ = client.Close() }()
+
+	health, err := client.Health(ctx)
+	if err != nil {
+		return "stale", nil
+	}
+	return "running", &health
+}
+
+func (flags *daemonFlags) runtimeDir() string {
+	if flags == nil {
+		return supervisor.DefaultRuntimeDir()
+	}
+	if runtimeDir := strings.TrimSpace(flags.RuntimeDir); runtimeDir != "" {
+		return runtimeDir
 	}
 	return supervisor.DefaultRuntimeDir()
+}
+
+func (flags *daemonFlags) client() *supervisor.Client {
+	return supervisor.NewClient(supervisor.ClientOptions{
+		RuntimeDir: flags.runtimeDir(),
+		Version:    version,
+	})
+}
+
+func daemonErrorCode(err error) (string, bool) {
+	for _, mapping := range daemonErrorMappings {
+		if errors.Is(err, mapping.err) {
+			return mapping.code, true
+		}
+	}
+	return "", false
 }
 
 func daemonBrowserBin(configured string, rootOptions *rootFlags) string {
@@ -134,4 +165,8 @@ func daemonBrowserBin(configured string, rootOptions *rootFlags) string {
 	}
 	_, environmentSettings, _ := config.LoadFromEnv(nil)
 	return resolvedBrowserBin(rootOptions.Runtime.BrowserBin, environmentSettings.RodBrowserBin)
+}
+
+func markCommandWithoutDependencies(cmd *cobra.Command) {
+	cmd.Annotations = map[string]string{"moth.no_dependencies": "true"}
 }

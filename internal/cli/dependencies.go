@@ -181,7 +181,7 @@ func (runtime *defaultDependencyRuntime) fill(deps *Dependencies) {
 	}
 }
 
-func (runtime *defaultDependencyRuntime) closeBrowserPool() error {
+func (runtime *defaultDependencyRuntime) closeDependencies() error {
 	var errs []error
 	if runtime.set.supervisorClient != nil {
 		errs = append(errs, runtime.set.supervisorClient.Close())

@@ -10,8 +10,6 @@ import (
 	"github.com/alnah/moth/internal/supervisor"
 )
 
-var newDaemonCommand = exec.Command
-
 func startDaemonProcess(ctx context.Context, spec supervisor.DaemonSpec) error {
 	command, err := daemonCommand(ctx, spec)
 	if err != nil {
@@ -41,39 +39,40 @@ func daemonCommand(ctx context.Context, spec supervisor.DaemonSpec) (*exec.Cmd, 
 		args = append(args, "--browser-bin", spec.BrowserBin)
 	}
 
-	command := newDaemonCommand(executable, args...)
+	//nolint:gosec,noctx // Executable is os.Executable and the daemon must outlive the CLI context.
+	command := exec.Command(executable, args...)
 	command.SysProcAttr = daemonSysProcAttr()
 	command.Env = daemonEnvironment(os.Environ())
 	return command, nil
 }
 
-func daemonEnvironment(environment []string) []string {
-	allowed := map[string]struct{}{
-		"PATH":            {},
-		"HOME":            {},
-		"USER":            {},
-		"LOGNAME":         {},
-		"SHELL":           {},
-		"TMPDIR":          {},
-		"TMP":             {},
-		"TEMP":            {},
-		"LANG":            {},
-		"LC_ALL":          {},
-		"LC_CTYPE":        {},
-		"DISPLAY":         {},
-		"WAYLAND_DISPLAY": {},
-		"XDG_RUNTIME_DIR": {},
-		"ROD_NO_SANDBOX":  {},
-		"ROD_BROWSER_BIN": {},
-	}
+var daemonEnvironmentAllowlist = map[string]struct{}{
+	"PATH":            {},
+	"HOME":            {},
+	"USER":            {},
+	"LOGNAME":         {},
+	"SHELL":           {},
+	"TMPDIR":          {},
+	"TMP":             {},
+	"TEMP":            {},
+	"LANG":            {},
+	"LC_ALL":          {},
+	"LC_CTYPE":        {},
+	"DISPLAY":         {},
+	"WAYLAND_DISPLAY": {},
+	"XDG_RUNTIME_DIR": {},
+	"ROD_NO_SANDBOX":  {},
+	"ROD_BROWSER_BIN": {},
+}
 
+func daemonEnvironment(environment []string) []string {
 	filtered := make([]string, 0, len(environment))
 	for _, entry := range environment {
 		name, _, ok := strings.Cut(entry, "=")
 		if !ok {
 			continue
 		}
-		if _, keep := allowed[name]; keep {
+		if _, keep := daemonEnvironmentAllowlist[name]; keep {
 			filtered = append(filtered, entry)
 		}
 	}

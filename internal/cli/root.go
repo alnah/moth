@@ -11,7 +11,6 @@ import (
 	"github.com/alnah/moth/internal/browser"
 	"github.com/alnah/moth/internal/config"
 	"github.com/alnah/moth/internal/limits"
-	"github.com/alnah/moth/internal/supervisor"
 )
 
 // ErrUnknownCommand reports a command name that is not registered.
@@ -133,7 +132,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	addTranscribeCommand(cmd, options, &deps)
 	addToolsCommand(cmd, options, &deps)
 	addVersionCommand(cmd, options)
-	renderCommandErrors(cmd, &options.Output, dependencyRuntime.closeBrowserPool)
+	renderCommandErrors(cmd, &options.Output, dependencyRuntime.closeDependencies)
 
 	return cmd
 }
@@ -233,8 +232,7 @@ func renderCommandErrors(command *cobra.Command, output *outputFlags, cleanup fu
 }
 
 func renderCommandError(cmd *cobra.Command, output outputFlags, err error) error {
-	var renderedErr renderedCommandError
-	if errors.As(err, &renderedErr) {
+	if _, ok := errors.AsType[renderedCommandError](err); ok {
 		return err
 	}
 
@@ -255,27 +253,11 @@ func renderCommandError(cmd *cobra.Command, output outputFlags, err error) error
 }
 
 func commandErrorFields(err error) (string, string, string) {
-	var commandErr *commandError
-	if errors.As(err, &commandErr) {
+	if commandErr, ok := errors.AsType[*commandError](err); ok {
 		return commandErr.code, commandErr.message, commandErr.writeContext
 	}
-	if errors.Is(err, supervisor.ErrDaemonUnavailable) {
-		return "daemon_unavailable", err.Error(), "write daemon error"
-	}
-	if errors.Is(err, supervisor.ErrDaemonVersion) {
-		return "daemon_version_mismatch", err.Error(), "write daemon error"
-	}
-	if errors.Is(err, supervisor.ErrDaemonAuth) {
-		return "daemon_unauthorized", err.Error(), "write daemon error"
-	}
-	if errors.Is(err, supervisor.ErrDaemonProtocol) {
-		return "daemon_protocol_error", err.Error(), "write daemon error"
-	}
-	if errors.Is(err, supervisor.ErrDaemonMethod) {
-		return "daemon_method_failed", err.Error(), "write daemon error"
-	}
-	if errors.Is(err, supervisor.ErrDaemonAlreadyRunning) {
-		return "daemon_already_running", err.Error(), "write daemon error"
+	if code, ok := daemonErrorCode(err); ok {
+		return code, err.Error(), "write daemon error"
 	}
 	if errors.Is(err, browser.ErrBrowserStateUnavailable) {
 		return "browser_state_unavailable", err.Error(), "write browser state error"
