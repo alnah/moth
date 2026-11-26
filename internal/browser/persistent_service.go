@@ -69,18 +69,22 @@ type PersistentServiceOptions struct {
 	Stateless  StatelessBrowserService
 	BrowserBin string
 	NoSandbox  bool
+	Lifecycle  LifecycleOptions
 }
 
 // PersistentService stores short-lived CLI browser state and reconnects per command.
 type PersistentService struct {
-	stateDirs  StateDirs
-	launcher   PersistentLauncher
-	connector  PersistentConnector
-	httpClient *http.Client
-	clock      func() time.Time
-	stateless  StatelessBrowserService
-	browserBin string
-	noSandbox  bool
+	stateDirs   StateDirs
+	launcher    PersistentLauncher
+	connector   PersistentConnector
+	httpClient  *http.Client
+	clock       func() time.Time
+	stateless   StatelessBrowserService
+	browserBin  string
+	noSandbox   bool
+	lifecycle   LifecycleOptions
+	browsers    map[string]*browserRecord
+	connections map[string]cachedBrowserConnection
 }
 
 // NewPersistentService creates a service for cross-process browser commands.
@@ -90,14 +94,17 @@ func NewPersistentService(options PersistentServiceOptions) *PersistentService {
 		stateDirs = defaultStateDirs()
 	}
 	service := &PersistentService{
-		stateDirs:  stateDirs,
-		launcher:   options.Launcher,
-		connector:  options.Connector,
-		httpClient: options.HTTPClient,
-		clock:      options.Clock,
-		stateless:  options.Stateless,
-		browserBin: options.BrowserBin,
-		noSandbox:  options.NoSandbox,
+		stateDirs:   stateDirs,
+		launcher:    options.Launcher,
+		connector:   options.Connector,
+		httpClient:  options.HTTPClient,
+		clock:       options.Clock,
+		stateless:   options.Stateless,
+		browserBin:  options.BrowserBin,
+		noSandbox:   options.NoSandbox,
+		lifecycle:   options.Lifecycle.withDefaults(),
+		browsers:    make(map[string]*browserRecord),
+		connections: make(map[string]cachedBrowserConnection),
 	}
 	if service.launcher == nil {
 		service.launcher = rodPersistentLauncher{}
@@ -119,9 +126,16 @@ func (service *PersistentService) Start(ctx context.Context, request StartReques
 	scope := service.writeScope(request.Scope)
 	state, readErr := service.loadState(scope)
 	if readErr == nil {
-		if _, err := service.connector.ConnectBrowser(ctx, state.DebugURL); err == nil {
+		connection, connectErr := service.connector.ConnectBrowser(ctx, state.DebugURL)
+		if connectErr == nil {
+			service.connections[scope] = cachedBrowserConnection{
+				DebugURL:   state.DebugURL,
+				Connection: connection,
+			}
+			service.touchBrowser(scope, service.clock(), state.Owned)
 			return state.status("running"), nil
 		}
+		service.invalidateConnection(scope)
 	} else if !errors.Is(readErr, os.ErrNotExist) && !errors.Is(readErr, ErrBrowserStateCorrupt) {
 		return BrowserStatus{}, readErr
 	}
@@ -148,6 +162,13 @@ func (service *PersistentService) Start(ctx context.Context, request StartReques
 	if err := service.saveState(state); err != nil {
 		return BrowserStatus{}, err
 	}
+	service.resetBrowser(scope, service.clock(), true)
+	if connection, connectErr := service.connector.ConnectBrowser(ctx, state.DebugURL); connectErr == nil {
+		service.connections[scope] = cachedBrowserConnection{
+			DebugURL:   state.DebugURL,
+			Connection: connection,
+		}
+	}
 	return state.status("running"), nil
 }
 
@@ -156,22 +177,35 @@ func (service *PersistentService) Stop(ctx context.Context, request StopRequest)
 	scope := service.readScope(request.Scope)
 	state, err := service.loadState(scope)
 	if errors.Is(err, os.ErrNotExist) {
+		service.invalidateConnection(scope)
+		service.deleteBrowser(scope)
 		return BrowserStatus{Status: "stopped", Scope: scope}, nil
 	}
 	if err != nil {
 		return BrowserStatus{}, err
 	}
 
-	if state.Owned {
-		if connection, connectErr := service.connector.ConnectBrowser(ctx, state.DebugURL); connectErr == nil {
-			if closeErr := connection.Close(ctx); closeErr != nil {
+	connection, ok := service.cachedConnection(scope)
+	if !ok || connection.DebugURL != state.DebugURL {
+		if connected, connectErr := service.connectionFor(ctx, scope, state.DebugURL); connectErr == nil {
+			connection = cachedBrowserConnection{DebugURL: state.DebugURL, Connection: connected}
+			ok = true
+		}
+	}
+	if ok {
+		if state.Owned {
+			if closeErr := connection.Connection.Close(ctx); closeErr != nil {
 				return BrowserStatus{}, fmt.Errorf("close owned browser: %w", closeErr)
 			}
+		} else if disconnectErr := disconnectConnection(ctx, connection.Connection); disconnectErr != nil {
+			return BrowserStatus{}, fmt.Errorf("disconnect external browser: %w", disconnectErr)
 		}
 	}
 	if err := service.removeState(scope); err != nil {
 		return BrowserStatus{}, err
 	}
+	service.invalidateConnection(scope)
+	service.deleteBrowser(scope)
 	status := state.status("stopped")
 	status.Scope = scope
 	return status, nil
@@ -200,9 +234,11 @@ func (service *PersistentService) Connect(ctx context.Context, request ConnectRe
 	if err != nil {
 		return BrowserStatus{}, err
 	}
-	if _, err := service.connector.ConnectBrowser(ctx, debugURL); err != nil {
+	connection, err := service.connector.ConnectBrowser(ctx, debugURL)
+	if err != nil {
 		return BrowserStatus{}, fmt.Errorf("connect external browser: %w", err)
 	}
+	service.connections[scope] = cachedBrowserConnection{DebugURL: debugURL, Connection: connection}
 	state := persistentBrowserState{
 		Scope:     scope,
 		DebugURL:  debugURL,
@@ -212,6 +248,7 @@ func (service *PersistentService) Connect(ctx context.Context, request ConnectRe
 	if err := service.saveState(state); err != nil {
 		return BrowserStatus{}, err
 	}
+	service.resetBrowser(scope, service.clock(), false)
 	return state.status("running"), nil
 }
 
@@ -221,8 +258,24 @@ func (service *PersistentService) OpenPage(ctx context.Context, request OpenPage
 	if err != nil {
 		return PageInfo{}, err
 	}
+	now := service.clock()
+	record := service.ensureBrowser(state.Scope, now, state.Owned)
+	key := persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
+	if _, _, syncErr := service.syncSessionPages(ctx, state.Scope, connection, key, now); syncErr != nil {
+		return PageInfo{}, syncErr
+	}
+	service.ensureSession(record, key, now)
+
 	page, err := connection.OpenPage(ctx, request)
 	if err != nil {
+		return PageInfo{}, err
+	}
+	service.recordPage(state.Scope, key, page, now)
+	if err := service.enforcePageLimit(ctx, connection, key, page.ID, now); err != nil {
 		return PageInfo{}, err
 	}
 	state.ActivePageID = page.ID
@@ -238,10 +291,24 @@ func (service *PersistentService) ListPages(ctx context.Context, request Session
 	if err != nil {
 		return nil, err
 	}
+	now := service.clock()
+	service.ensureBrowser(state.Scope, now, state.Owned)
+	key := persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
 	pages, err := connection.ListPages(ctx, request)
 	if err != nil {
 		return nil, err
 	}
+	if _, _, syncErr := service.syncSessionPages(ctx, state.Scope, connection, key, now); syncErr != nil {
+		return nil, syncErr
+	}
+	if len(pages) > 0 {
+		service.touchSession(state.Scope, key, now)
+	}
+	service.touchBrowser(state.Scope, now, state.Owned)
 	service.markActivePage(pages, state.ActivePageID)
 	if active := activePageID(pages); active != "" && active != state.ActivePageID {
 		state.ActivePageID = active
@@ -258,10 +325,21 @@ func (service *PersistentService) SwitchPage(ctx context.Context, request PageSe
 	if err != nil {
 		return PageInfo{}, err
 	}
+	now := service.clock()
+	service.ensureBrowser(state.Scope, now, state.Owned)
+	key := persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
+	if _, _, syncErr := service.syncSessionPages(ctx, state.Scope, connection, key, now); syncErr != nil {
+		return PageInfo{}, syncErr
+	}
 	page, err := connection.SwitchPage(ctx, request)
 	if err != nil {
 		return PageInfo{}, err
 	}
+	service.recordPage(state.Scope, key, page, now)
 	state.ActivePageID = page.ID
 	if err := service.saveState(state); err != nil {
 		return PageInfo{}, err
@@ -275,10 +353,19 @@ func (service *PersistentService) ClosePage(ctx context.Context, request PageSel
 	if err != nil {
 		return err
 	}
+	now := service.clock()
+	service.ensureBrowser(state.Scope, now, state.Owned)
+	key := persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
 	if closeErr := connection.ClosePage(ctx, request); closeErr != nil {
 		return closeErr
 	}
+	service.removePage(state.Scope, key, request.PageID)
+	service.touchBrowser(state.Scope, now, state.Owned)
 	pages, err := connection.ListPages(ctx, selectionSession(request))
 	if err != nil {
 		return err
@@ -294,7 +381,15 @@ func (service *PersistentService) Click(ctx context.Context, request Interaction
 		return err
 	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
-	return connection.Click(ctx, request)
+	if err := connection.Click(ctx, request); err != nil {
+		return err
+	}
+	service.touchPage(state.Scope, persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}, request.PageID, service.clock())
+	return nil
 }
 
 // Input types text into a selector on the active or selected persistent page.
@@ -304,7 +399,15 @@ func (service *PersistentService) Input(ctx context.Context, request InputReques
 		return err
 	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
-	return connection.Input(ctx, request)
+	if err := connection.Input(ctx, request); err != nil {
+		return err
+	}
+	service.touchPage(state.Scope, persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}, request.PageID, service.clock())
+	return nil
 }
 
 // Wait waits for a selector on the active or selected persistent page.
@@ -314,7 +417,15 @@ func (service *PersistentService) Wait(ctx context.Context, request WaitRequest)
 		return err
 	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
-	return connection.Wait(ctx, request)
+	if err := connection.Wait(ctx, request); err != nil {
+		return err
+	}
+	service.touchPage(state.Scope, persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}, request.PageID, service.clock())
+	return nil
 }
 
 // AccessibilityTree extracts accessibility data from the active or selected persistent page.
@@ -327,7 +438,16 @@ func (service *PersistentService) AccessibilityTree(
 		return AccessibilityTree{}, err
 	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
-	return connection.AccessibilityTree(ctx, request)
+	tree, err := connection.AccessibilityTree(ctx, request)
+	if err != nil {
+		return AccessibilityTree{}, err
+	}
+	service.touchPage(state.Scope, persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}, request.PageID, service.clock())
+	return tree, nil
 }
 
 // DetectManualChallenge reports manual challenge state for the active or selected persistent page.
@@ -340,7 +460,16 @@ func (service *PersistentService) DetectManualChallenge(
 		return ManualChallengeResult{}, err
 	}
 	request.PageID = selectedPageID(request.PageID, state.ActivePageID)
-	return connection.DetectManualChallenge(ctx, request)
+	result, err := connection.DetectManualChallenge(ctx, request)
+	if err != nil {
+		return ManualChallengeResult{}, err
+	}
+	service.touchPage(state.Scope, persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}, request.PageID, service.clock())
+	return result, nil
 }
 
 // Download captures a download from the active or selected persistent page.
@@ -358,6 +487,11 @@ func (service *PersistentService) Download(ctx context.Context, request Download
 	if err != nil {
 		return CapturedDownload{}, err
 	}
+	service.touchPage(state.Scope, persistentSessionKey{
+		Scope:       state.Scope,
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}, request.PageID, service.clock())
 	if captured.Path == request.Path {
 		return captured, nil
 	}
@@ -409,7 +543,7 @@ func (service *PersistentService) connectFromState(
 	if err != nil {
 		return persistentBrowserState{}, nil, fmt.Errorf("%w: %w", ErrBrowserStateUnavailable, err)
 	}
-	connection, err := service.connector.ConnectBrowser(ctx, state.DebugURL)
+	connection, err := service.connectionFor(ctx, state.Scope, state.DebugURL)
 	if err != nil {
 		return persistentBrowserState{}, nil, fmt.Errorf("%w: %w", ErrBrowserStateUnavailable, err)
 	}

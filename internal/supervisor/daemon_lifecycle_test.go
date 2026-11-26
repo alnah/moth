@@ -15,7 +15,7 @@ import (
 
 func TestDaemonStopsWhenIdle(t *testing.T) {
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
+	startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
 		IdleTimeout:  100 * time.Millisecond,
 		ReapInterval: 10 * time.Millisecond,
 	})
@@ -27,7 +27,7 @@ func TestDaemonDoesNotStopDuringActiveRequest(t *testing.T) {
 	worker := newBlockingOpenWorker()
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
+	startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
 		IdleTimeout:  250 * time.Millisecond,
 		ReapInterval: 10 * time.Millisecond,
 		Pool:         pool,
@@ -79,7 +79,7 @@ func startDaemonWithOptions(
 	runtimeDir string,
 	version string,
 	options supervisor.RunOptions,
-) *inProcessDaemon {
+) {
 	t.Helper()
 
 	daemon, err := launchDaemonWithOptions(runtimeDir, version, options)
@@ -91,7 +91,6 @@ func startDaemonWithOptions(
 			t.Errorf("stop daemon with options at %q: %v", runtimeDir, err)
 		}
 	})
-	return daemon
 }
 
 func launchDaemonWithOptions(

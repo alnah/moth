@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alnah/moth/internal/browser"
@@ -24,8 +26,15 @@ type Server struct {
 	version   string
 	token     string
 	startedAt time.Time
+	clock     func() time.Time
+	lifecycle browser.LifecycleOptions
+	logger    *slog.Logger
 	pool      *browser.Pool
 	handlers  map[string]methodHandler
+
+	activityMu   sync.Mutex
+	lastActivity time.Time
+	activeCalls  atomic.Int64
 
 	shutdownOnce sync.Once
 	shutdownCh   chan struct{}
@@ -41,18 +50,45 @@ func NewServer(options ServerOptions) *Server {
 	if startedAt.IsZero() {
 		startedAt = clock()
 	}
+	logger := options.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	server := &Server{
-		version:    options.Version,
-		token:      options.Token,
-		startedAt:  startedAt,
-		pool:       options.Pool,
-		handlers:   make(map[string]methodHandler),
-		shutdownCh: make(chan struct{}),
+		version:      options.Version,
+		token:        options.Token,
+		startedAt:    startedAt,
+		clock:        clock,
+		lifecycle:    options.Lifecycle,
+		logger:       logger,
+		pool:         options.Pool,
+		handlers:     make(map[string]methodHandler),
+		lastActivity: startedAt,
+		shutdownCh:   make(chan struct{}),
 	}
 	server.handlers[MethodHealth] = server.handleHealth
 	server.handlers[MethodShutdown] = server.handleShutdown
 	server.handlers[MethodFetchRendered] = server.handleFetchRendered
 	return server
+}
+
+// Reap runs one persistent browser lifecycle pass.
+func (server *Server) Reap(context.Context) (browser.ReapReport, error) {
+	return browser.ReapReport{}, nil
+}
+
+// Idle reports whether the daemon can stop after the given inactivity.
+func (server *Server) Idle(timeout time.Duration) bool {
+	if server.activeCalls.Load() != 0 {
+		return false
+	}
+	server.activityMu.Lock()
+	lastActivity := server.lastActivity
+	server.activityMu.Unlock()
+	if server.clock().Sub(lastActivity) < timeout {
+		return false
+	}
+	return server.activeBrowsers() == 0
 }
 
 // Handler returns the daemon HTTP handler.
@@ -87,6 +123,8 @@ func (server *Server) requestShutdown() {
 }
 
 func (server *Server) handleCall(writer http.ResponseWriter, request *http.Request) {
+	server.beginCall()
+	defer server.endCall()
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
@@ -212,8 +250,23 @@ func (server *Server) health() Health {
 		Version:        server.version,
 		PID:            os.Getpid(),
 		StartedAt:      server.startedAt,
-		ActiveBrowsers: 0,
+		ActiveBrowsers: server.activeBrowsers(),
 	}
+}
+
+func (server *Server) beginCall() {
+	server.activeCalls.Add(1)
+	server.activityMu.Lock()
+	server.lastActivity = server.clock()
+	server.activityMu.Unlock()
+}
+
+func (server *Server) endCall() {
+	server.activeCalls.Add(-1)
+}
+
+func (server *Server) activeBrowsers() int {
+	return 0
 }
 
 func marshalResult(value any) (json.RawMessage, error) {

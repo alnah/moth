@@ -34,7 +34,7 @@ func TestOpenPageKeepsAtMostEightPages(t *testing.T) {
 	ctx := context.Background()
 	clock := newLifecycleClock()
 	browser := newLifecycleBrowser()
-	browser.pages = pages(1, 8)
+	browser.pages = pageRange(8)
 	service, _, _ := newLifecycleService(t, clock, lifecycleTestOptions(), browser, true)
 
 	page, err := service.OpenPage(ctx, OpenPageRequest{URL: "https://example.test/nine"})
@@ -44,42 +44,42 @@ func TestOpenPageKeepsAtMostEightPages(t *testing.T) {
 	if page.ID != "page-9" {
 		t.Fatalf("OpenPage(ninth).ID = %q, want page-9", page.ID)
 	}
-	assertLifecyclePageIDs(t, browser.pages, []string{"page-2", "page-3", "page-4", "page-5", "page-6", "page-7", "page-8", "page-9"})
+	assertLifecyclePageIDs(t, browser.pages, pageIDRange(2, 9))
 }
 
 func TestOpenPageKeepsExistingPagesWhenOpenFails(t *testing.T) {
 	ctx := context.Background()
 	clock := newLifecycleClock()
 	browser := newLifecycleBrowser()
-	browser.pages = pages(1, 8)
+	browser.pages = pageRange(8)
 	browser.openErr = errors.New("navigation failed")
 	service, _, _ := newLifecycleService(t, clock, lifecycleTestOptions(), browser, true)
 
 	if _, err := service.OpenPage(ctx, OpenPageRequest{URL: "https://example.test/bad"}); err == nil {
 		t.Fatal("OpenPage(failed navigation) error = nil, want error")
 	}
-	assertLifecyclePageIDs(t, browser.pages, []string{"page-1", "page-2", "page-3", "page-4", "page-5", "page-6", "page-7", "page-8"})
+	assertLifecyclePageIDs(t, browser.pages, pageIDRange(1, 8))
 }
 
 func TestOpenPageRollsBackNewPageWhenEvictionFails(t *testing.T) {
 	ctx := context.Background()
 	clock := newLifecycleClock()
 	browser := newLifecycleBrowser()
-	browser.pages = pages(1, 8)
+	browser.pages = pageRange(8)
 	browser.closeErrors = map[string]error{"page-1": errors.New("close failed")}
 	service, _, _ := newLifecycleService(t, clock, lifecycleTestOptions(), browser, true)
 
 	if _, err := service.OpenPage(ctx, OpenPageRequest{URL: "https://example.test/nine"}); err == nil {
 		t.Fatal("OpenPage(eviction failure) error = nil, want error")
 	}
-	assertLifecyclePageIDs(t, browser.pages, []string{"page-1", "page-2", "page-3", "page-4", "page-5", "page-6", "page-7", "page-8"})
+	assertLifecyclePageIDs(t, browser.pages, pageIDRange(1, 8))
 }
 
 func TestReapClosesIdlePageWithoutClosingBrowser(t *testing.T) {
 	ctx := context.Background()
 	clock := newLifecycleClock()
 	browser := newLifecycleBrowser()
-	browser.pages = pages(1, 2)
+	browser.pages = pageRange(2)
 	options := lifecycleTestOptions()
 	options.BrowserIdle = time.Hour
 	options.SessionIdle = time.Hour
@@ -264,7 +264,7 @@ func TestReapKeepsPageWhenCloseFails(t *testing.T) {
 	ctx := context.Background()
 	clock := newLifecycleClock()
 	browser := newLifecycleBrowser()
-	browser.pages = pages(1, 1)
+	browser.pages = pageRange(1)
 	options := lifecycleTestOptions()
 	options.PageIdle = 30 * time.Minute
 	service, _, _ := newLifecycleService(t, clock, options, browser, true)
@@ -284,7 +284,7 @@ func TestReapIsConservativeWhenListPagesFails(t *testing.T) {
 	ctx := context.Background()
 	clock := newLifecycleClock()
 	browser := newLifecycleBrowser()
-	browser.pages = pages(1, 1)
+	browser.pages = pageRange(1)
 	service, _, _ := newLifecycleService(t, clock, lifecycleTestOptions(), browser, true)
 
 	if _, err := service.ListPages(ctx, SessionRequest{}); err != nil {
@@ -356,6 +356,37 @@ func lifecycleTestOptions() LifecycleOptions {
 	return options
 }
 
+type lifecycleConnector struct {
+	browsers  map[string]*lifecycleBrowser
+	failures  map[string]error
+	connected []string
+}
+
+func newLifecycleConnector(browsers map[string]*lifecycleBrowser) *lifecycleConnector {
+	return &lifecycleConnector{
+		browsers: browsers,
+		failures: make(map[string]error),
+	}
+}
+
+func (connector *lifecycleConnector) ConnectBrowser(
+	ctx context.Context,
+	debugURL string,
+) (BrowserConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	connector.connected = append(connector.connected, debugURL)
+	if err := connector.failures[debugURL]; err != nil {
+		return nil, err
+	}
+	browser, ok := connector.browsers[debugURL]
+	if !ok {
+		return nil, fmt.Errorf("unexpected debug URL %q", debugURL)
+	}
+	return browser, nil
+}
+
 type lifecycleClock struct {
 	now time.Time
 }
@@ -378,10 +409,14 @@ type lifecycleBrowser struct {
 	listErr      error
 	closeErrors  map[string]error
 	disconnected bool
+	sessions     map[persistentSessionKey][]string
 }
 
 func newLifecycleBrowser() *lifecycleBrowser {
-	return &lifecycleBrowser{fakePersistentBrowser: newFakePersistentBrowser()}
+	return &lifecycleBrowser{
+		fakePersistentBrowser: newFakePersistentBrowser(),
+		sessions:              make(map[persistentSessionKey][]string),
+	}
 }
 
 func (browser *lifecycleBrowser) OpenPage(
@@ -391,7 +426,16 @@ func (browser *lifecycleBrowser) OpenPage(
 	if browser.openErr != nil {
 		return PageInfo{}, browser.openErr
 	}
-	return browser.fakePersistentBrowser.OpenPage(ctx, request)
+	page, err := browser.fakePersistentBrowser.OpenPage(ctx, request)
+	if err != nil {
+		return PageInfo{}, err
+	}
+	key := persistentSessionKey{
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
+	browser.sessions[key] = append(browser.sessions[key], page.ID)
+	return page, nil
 }
 
 func (browser *lifecycleBrowser) ListPages(
@@ -401,7 +445,24 @@ func (browser *lifecycleBrowser) ListPages(
 	if browser.listErr != nil {
 		return nil, browser.listErr
 	}
-	return browser.fakePersistentBrowser.ListPages(ctx, request)
+	key := persistentSessionKey{
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
+	ids := browser.sessions[key]
+	if len(ids) == 0 {
+		return []PageInfo{}, nil
+	}
+	pages := make([]PageInfo, 0, len(ids))
+	for _, page := range browser.pages {
+		for _, id := range ids {
+			if page.ID == id {
+				pages = append(pages, page)
+				break
+			}
+		}
+	}
+	return pages, nil
 }
 
 func (browser *lifecycleBrowser) ClosePage(
@@ -411,7 +472,21 @@ func (browser *lifecycleBrowser) ClosePage(
 	if err := browser.closeErrors[request.PageID]; err != nil {
 		return err
 	}
-	return browser.fakePersistentBrowser.ClosePage(ctx, request)
+	key := persistentSessionKey{
+		ProfileName: request.ProfileName,
+		SessionName: request.SessionName,
+	}
+	if err := browser.fakePersistentBrowser.ClosePage(ctx, request); err != nil {
+		return err
+	}
+	ids := browser.sessions[key]
+	for index, id := range ids {
+		if id == request.PageID {
+			browser.sessions[key] = append(ids[:index], ids[index+1:]...)
+			break
+		}
+	}
+	return nil
 }
 
 func (browser *lifecycleBrowser) Ping(context.Context) error {
@@ -429,13 +504,19 @@ func newLifecycleService(
 	options LifecycleOptions,
 	browser *lifecycleBrowser,
 	owned bool,
-) (*PersistentService, StateDirs, *fakePersistentConnector) {
+) (*PersistentService, StateDirs, *lifecycleConnector) {
 	t.Helper()
 
 	stateDirs := newTestStateDirs(t)
-	connector := newFakePersistentConnector(map[string]*fakePersistentBrowser{
-		"ws://lifecycle": browser.fakePersistentBrowser,
+	connector := newLifecycleConnector(map[string]*lifecycleBrowser{
+		"ws://lifecycle": browser,
 	})
+	if len(browser.sessions) == 0 && len(browser.pages) > 0 {
+		key := persistentSessionKey{}
+		for _, page := range browser.pages {
+			browser.sessions[key] = append(browser.sessions[key], page.ID)
+		}
+	}
 	service := NewPersistentService(PersistentServiceOptions{
 		StateDirs: stateDirs,
 		Connector: connector,
@@ -449,9 +530,9 @@ func newLifecycleService(
 	return service, stateDirs, connector
 }
 
-func pages(first int, last int) []PageInfo {
-	pages := make([]PageInfo, 0, last-first+1)
-	for id := first; id <= last; id++ {
+func pageRange(last int) []PageInfo {
+	pages := make([]PageInfo, 0, last)
+	for id := 1; id <= last; id++ {
 		pages = append(pages, PageInfo{
 			ID:     fmt.Sprintf("page-%d", id),
 			URL:    fmt.Sprintf("https://example.test/%d", id),
@@ -459,6 +540,14 @@ func pages(first int, last int) []PageInfo {
 		})
 	}
 	return pages
+}
+
+func pageIDRange(first int, last int) []string {
+	ids := make([]string, 0, last-first+1)
+	for id := first; id <= last; id++ {
+		ids = append(ids, fmt.Sprintf("page-%d", id))
+	}
+	return ids
 }
 
 func assertLifecyclePageIDs(t *testing.T, pages []PageInfo, want []string) {

@@ -16,7 +16,10 @@ import (
 
 const (
 	defaultReadHeaderTimeout = 5 * time.Second
-	defaultIdleTimeout       = 60 * time.Second
+	defaultHTTPIdleTimeout   = 60 * time.Second
+	defaultDaemonIdleTimeout = 5 * time.Minute
+	defaultReapInterval      = 30 * time.Second
+	defaultReapTimeout       = 30 * time.Second
 )
 
 type daemonProcess struct {
@@ -27,6 +30,7 @@ type daemonProcess struct {
 	server         *Server
 	serveErr       chan error
 	cancelRequests context.CancelFunc
+	cancelReaper   context.CancelFunc
 }
 
 // Run starts a daemon and blocks until its context or a shutdown request.
@@ -90,6 +94,8 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		Version:   options.Version,
 		Token:     token,
 		StartedAt: startedAt,
+		Lifecycle: options.Lifecycle,
+		Logger:    options.Logger,
 		Pool:      pool,
 	})
 	daemon.server = server
@@ -114,6 +120,18 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		daemon.serveErr <- httpServer.Serve(listener)
 	}()
 
+	idleTimeout := options.IdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultDaemonIdleTimeout
+	}
+	reapInterval := options.ReapInterval
+	if reapInterval <= 0 {
+		reapInterval = defaultReapInterval
+	}
+	reaperCtx, cancelReaper := context.WithCancel(ctx)
+	daemon.cancelReaper = cancelReaper
+	go daemon.reapLoop(reaperCtx, reapInterval, idleTimeout)
+
 	cleanup = false
 	return daemon, nil
 }
@@ -125,7 +143,7 @@ func newDaemonHTTPServer(handler http.Handler) (*http.Server, context.CancelFunc
 	httpServer := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: defaultReadHeaderTimeout,
-		IdleTimeout:       defaultIdleTimeout,
+		IdleTimeout:       defaultHTTPIdleTimeout,
 		BaseContext: func(net.Listener) context.Context {
 			return requestCtx
 		},
@@ -153,6 +171,9 @@ func (daemon *daemonProcess) wait(ctx context.Context) error {
 }
 
 func (daemon *daemonProcess) close() error {
+	if daemon.cancelReaper != nil {
+		daemon.cancelReaper()
+	}
 	if daemon.cancelRequests != nil {
 		daemon.cancelRequests()
 	}
@@ -164,6 +185,36 @@ func (daemon *daemonProcess) close() error {
 	removeRuntime(daemon.runtimeDir)
 	daemon.closeResources()
 	return closeErr
+}
+
+func (daemon *daemonProcess) reapLoop(ctx context.Context, interval time.Duration, idleTimeout time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reapCtx, cancel := context.WithTimeout(ctx, defaultReapTimeout)
+			report, err := daemon.server.Reap(reapCtx)
+			cancel()
+			if err != nil {
+				daemon.server.logger.Warn("reap browser lifecycle", "error", err)
+			}
+			if report.ClosedPages != 0 || report.ClosedSessions != 0 || report.ClosedBrowsers != 0 {
+				daemon.server.logger.Debug("reaped browser lifecycle",
+					"pages", report.ClosedPages,
+					"sessions", report.ClosedSessions,
+					"browsers", report.ClosedBrowsers,
+				)
+			}
+			if daemon.server.Idle(idleTimeout) {
+				daemon.server.requestShutdown()
+				return
+			}
+		}
+	}
 }
 
 func (daemon *daemonProcess) closeResources() {

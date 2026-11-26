@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -131,11 +132,14 @@ type ClientOptions struct {
 
 // RunOptions configures a daemon process.
 type RunOptions struct {
-	RuntimeDir  string
-	Version     string
-	BrowserBin  string
-	IdleTimeout time.Duration
-	Pool        *browser.Pool
+	RuntimeDir   string
+	Version      string
+	BrowserBin   string
+	IdleTimeout  time.Duration
+	ReapInterval time.Duration
+	Lifecycle    browser.LifecycleOptions
+	Logger       *slog.Logger
+	Pool         *browser.Pool
 }
 
 // ServerOptions configures a daemon HTTP server.
@@ -144,5 +148,7 @@ type ServerOptions struct {
 	Token     string
 	StartedAt time.Time
 	Clock     func() time.Time
+	Lifecycle browser.LifecycleOptions
+	Logger    *slog.Logger
 	Pool      *browser.Pool
 }
