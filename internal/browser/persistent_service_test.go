@@ -668,6 +668,11 @@ type fakePersistentBrowser struct {
 	downloadResult    CapturedDownload
 	hasDownloadResult bool
 	closed            bool
+	closeErr          error
+	pings             int
+	pingErr           error
+	disconnects       int
+	disconnectErr     error
 }
 
 type persistentBrowserAction struct {
@@ -783,9 +788,19 @@ func (browser *fakePersistentBrowser) Download(_ context.Context, request Downlo
 	return CapturedDownload{Path: request.Path, Bytes: int64(11), ContentType: "application/zip"}, nil
 }
 
+func (browser *fakePersistentBrowser) Ping(context.Context) error {
+	browser.pings++
+	return browser.pingErr
+}
+
+func (browser *fakePersistentBrowser) Disconnect(context.Context) error {
+	browser.disconnects++
+	return browser.disconnectErr
+}
+
 func (browser *fakePersistentBrowser) Close(context.Context) error {
 	browser.closed = true
-	return nil
+	return browser.closeErr
 }
 
 func (browser *fakePersistentBrowser) selectedPageID(pageID string) string {

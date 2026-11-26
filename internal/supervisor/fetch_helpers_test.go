@@ -4,7 +4,6 @@ package supervisor_test
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +22,13 @@ type fakePoolWorker struct {
 	request   browser.PageRequest
 	closed    chan struct{}
 	closeOnce sync.Once
+
+	screenshot    []byte
+	screenshotErr error
+	pdf           []byte
+	pdfErr        error
+	metadata      browser.ResponseMetadata
+	metadataErr   error
 }
 
 func newFakePoolWorker(html string) *fakePoolWorker {
@@ -46,7 +52,27 @@ func (worker *fakePoolWorker) OpenPage(_ context.Context, request browser.PageRe
 }
 
 func (worker *fakePoolWorker) CaptureScreenshot(context.Context, browser.ScreenshotRequest) ([]byte, error) {
-	return nil, errors.New("screenshot not implemented in fake worker")
+	if worker.screenshotErr != nil {
+		return nil, worker.screenshotErr
+	}
+	return worker.screenshot, nil
+}
+
+func (worker *fakePoolWorker) CapturePDF(context.Context, browser.PDFRequest) ([]byte, error) {
+	if worker.pdfErr != nil {
+		return nil, worker.pdfErr
+	}
+	return worker.pdf, nil
+}
+
+func (worker *fakePoolWorker) ResponseMetadata(
+	context.Context,
+	browser.ResponseMetadataRequest,
+) (browser.ResponseMetadata, error) {
+	if worker.metadataErr != nil {
+		return browser.ResponseMetadata{}, worker.metadataErr
+	}
+	return worker.metadata, nil
 }
 
 func (worker *fakePoolWorker) Close() error {
