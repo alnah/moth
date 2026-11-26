@@ -8,10 +8,23 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
+
+type methodHandler func(context.Context, json.RawMessage) (json.RawMessage, error)
+
+// Server serves the daemon protocol.
+type Server struct {
+	version   string
+	token     string
+	startedAt time.Time
+	handlers  map[string]methodHandler
+
+	shutdownOnce sync.Once
+	shutdownCh   chan struct{}
+}
 
 // NewServer creates a daemon protocol server.
 func NewServer(options ServerOptions) *Server {
@@ -23,13 +36,16 @@ func NewServer(options ServerOptions) *Server {
 	if startedAt.IsZero() {
 		startedAt = clock()
 	}
-	return &Server{
+	server := &Server{
 		version:    options.Version,
 		token:      options.Token,
 		startedAt:  startedAt,
-		clock:      clock,
+		handlers:   make(map[string]methodHandler),
 		shutdownCh: make(chan struct{}),
 	}
+	server.handlers[MethodHealth] = server.handleHealth
+	server.handlers[MethodShutdown] = server.handleShutdown
+	return server
 }
 
 // Handler returns the daemon HTTP handler.
@@ -43,6 +59,10 @@ func (server *Server) Handler() http.Handler {
 func (server *Server) Shutdown(context.Context) error {
 	server.requestShutdown()
 	return nil
+}
+
+func (server *Server) done() <-chan struct{} {
+	return server.shutdownCh
 }
 
 func (server *Server) requestShutdown() {
@@ -94,7 +114,7 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	result, err := server.dispatch(call)
+	result, err := server.dispatch(request.Context(), call)
 	if err != nil {
 		code := CodeProtocolError
 		if errors.Is(err, errMethodNotFound) {
@@ -124,16 +144,21 @@ func (server *Server) authorized(request *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(token), []byte(server.token)) == 1
 }
 
-func (server *Server) dispatch(call Call) (json.RawMessage, error) {
-	switch call.Method {
-	case MethodHealth:
-		return marshalResult(server.health())
-	case MethodShutdown:
-		server.requestShutdown()
-		return marshalResult(server.health())
-	default:
+func (server *Server) dispatch(ctx context.Context, call Call) (json.RawMessage, error) {
+	handler, ok := server.handlers[call.Method]
+	if !ok {
 		return nil, fmt.Errorf("%w: %s", errMethodNotFound, call.Method)
 	}
+	return handler(ctx, call.Params)
+}
+
+func (server *Server) handleHealth(context.Context, json.RawMessage) (json.RawMessage, error) {
+	return marshalResult(server.health())
+}
+
+func (server *Server) handleShutdown(context.Context, json.RawMessage) (json.RawMessage, error) {
+	server.requestShutdown()
+	return marshalResult(server.health())
 }
 
 func (server *Server) health() Health {
@@ -161,88 +186,3 @@ func writeReply(writer http.ResponseWriter, status int, reply Reply) {
 }
 
 var errMethodNotFound = errors.New("method not found")
-
-// Run starts a daemon and blocks until its context or a shutdown request.
-func Run(ctx context.Context, options RunOptions) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	runtimeDir := strings.TrimSpace(options.RuntimeDir)
-	if runtimeDir == "" {
-		runtimeDir = defaultRuntimeDir()
-	}
-	if err := prepareRuntimeDir(runtimeDir); err != nil {
-		return err
-	}
-
-	runtimeLock, err := acquireRuntimeLock(runtimeDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = runtimeLock.Close() }()
-
-	listener, network, address, err := listen(ctx, runtimeDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = listener.Close() }()
-
-	token, err := newToken()
-	if err != nil {
-		return err
-	}
-	startedAt := time.Now().UTC()
-	server := NewServer(ServerOptions{
-		Version:   options.Version,
-		Token:     token,
-		StartedAt: startedAt,
-	})
-	httpServer := &http.Server{
-		Handler:           server.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
-	runtime := Runtime{
-		Version:   options.Version,
-		PID:       os.Getpid(),
-		Network:   network,
-		Address:   address,
-		Token:     token,
-		StartedAt: startedAt,
-	}
-	if err := writeRuntime(runtimeDir, runtime); err != nil {
-		return err
-	}
-	defer removeRuntime(runtimeDir)
-
-	serveErr := make(chan error, 1)
-	go func() {
-		serveErr <- httpServer.Serve(listener)
-	}()
-
-	select {
-	case <-ctx.Done():
-	case <-server.shutdownCh:
-	case err := <-serveErr:
-		if !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("serve daemon: %w", err)
-		}
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultServerTimeout)
-	defer cancel()
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown daemon: %w", err)
-	}
-	return nil
-}
-
-func defaultRuntimeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = os.TempDir()
-	}
-	return filepath.Join(home, ".moth", "run")
-}

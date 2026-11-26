@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -16,7 +17,7 @@ type runtimeLock struct {
 }
 
 func acquireRuntimeLock(runtimeDir string) (*runtimeLock, error) {
-	path := runtimeDir + string(os.PathSeparator) + lockFileName
+	path := filepath.Join(runtimeDir, lockFileName)
 	//nolint:gosec // Lock path derives from the configured runtime directory.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

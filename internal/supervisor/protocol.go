@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -25,7 +24,9 @@ const (
 	// CodeUnauthorized reports a missing or invalid daemon token.
 	CodeUnauthorized = "daemon_unauthorized"
 
-	maxRequestBody       = 1 << 20
+	daemonProbeAttempts = 2
+	maxRequestBody      = 1 << 20
+
 	defaultHealthTimeout = 2 * time.Second
 	defaultShutdownWait  = 5 * time.Second
 	defaultServerTimeout = 5 * time.Second
@@ -119,15 +120,4 @@ type ServerOptions struct {
 	Token     string
 	StartedAt time.Time
 	Clock     func() time.Time
-}
-
-// Server serves the daemon protocol.
-type Server struct {
-	version   string
-	token     string
-	startedAt time.Time
-	clock     func() time.Time
-
-	shutdownOnce sync.Once
-	shutdownCh   chan struct{}
 }

@@ -17,7 +17,6 @@ import (
 // Client talks to the local Moth daemon.
 type Client struct {
 	options ClientOptions
-	version string
 
 	mu         sync.Mutex
 	endpoint   *Endpoint
@@ -26,10 +25,7 @@ type Client struct {
 
 // NewClient creates a daemon client.
 func NewClient(options ClientOptions) *Client {
-	return &Client{
-		options: options,
-		version: options.Version,
-	}
+	return &Client{options: options}
 }
 
 // Health returns the daemon health, starting the daemon when necessary.
@@ -54,8 +50,7 @@ func (client *Client) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	if err != nil {
-		client.clearEndpointLocked()
-		removeRuntime(client.options.RuntimeDir)
+		client.forgetRuntimeLocked()
 		return nil
 	}
 
@@ -68,8 +63,7 @@ func (client *Client) Shutdown(ctx context.Context) error {
 		return ctxErr
 	}
 	if callErr != nil {
-		client.clearEndpointLocked()
-		removeRuntime(client.options.RuntimeDir)
+		client.forgetRuntimeLocked()
 		return nil
 	}
 
@@ -103,7 +97,7 @@ func (client *Client) Close() error {
 }
 
 func (client *Client) ensureLocked(ctx context.Context) (Health, error) {
-	for range 2 {
+	for range daemonProbeAttempts {
 		health, found, retry, err := client.probeLocked(ctx)
 		if err == nil && found {
 			return health, nil
@@ -235,12 +229,12 @@ func (client *Client) healthLocked(ctx context.Context) (Health, error) {
 	if err := client.callLocked(ctx, MethodHealth, &health); err != nil {
 		return Health{}, err
 	}
-	if client.version != "" && health.Version != client.version {
+	if client.options.Version != "" && health.Version != client.options.Version {
 		return Health{}, fmt.Errorf(
 			"%w: daemon %q, client %q",
 			ErrDaemonVersion,
 			health.Version,
-			client.version,
+			client.options.Version,
 		)
 	}
 	return health, nil
@@ -351,6 +345,11 @@ func (client *Client) setEndpointLocked(runtime Runtime) {
 		client.httpClient.CloseIdleConnections()
 	}
 	client.httpClient = client.newHTTPClientLocked()
+}
+
+func (client *Client) forgetRuntimeLocked() {
+	client.clearEndpointLocked()
+	removeRuntime(client.options.RuntimeDir)
 }
 
 func (client *Client) clearEndpointLocked() {

@@ -45,10 +45,6 @@ func ReadRuntime(runtimeDir string) (Runtime, error) {
 }
 
 func writeRuntime(runtimeDir string, runtime Runtime) error {
-	if err := prepareRuntimeDir(runtimeDir); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(runtime, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode runtime file: %w", err)
