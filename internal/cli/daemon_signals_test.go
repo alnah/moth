@@ -64,6 +64,29 @@ func runDaemonSignalChild(t *testing.T, signal os.Signal) {
 	t.Helper()
 
 	runtimeDir := newShortRuntimeDir(t)
+	child := startDaemonSignalChild(t, runtimeDir)
+
+	waitForDaemonRuntime(t, runtimeDir)
+	if err := child.command.Process.Signal(signal); err != nil {
+		t.Fatalf("send %s: %v", signal, err)
+	}
+	child.waitForExit(t, signal)
+
+	assertDaemonPathRemoved(t, signal, "runtime", supervisor.RuntimePath(runtimeDir))
+	assertDaemonPathRemoved(t, signal, "socket", supervisor.SocketPath(runtimeDir))
+}
+
+type daemonSignalChild struct {
+	command *exec.Cmd
+	done    chan struct{}
+	waitErr error
+	output  *bytes.Buffer
+}
+
+func startDaemonSignalChild(t *testing.T, runtimeDir string) *daemonSignalChild {
+	t.Helper()
+
+	output := new(bytes.Buffer)
 	//nolint:gosec,noctx // The test binary path comes from os.Args[0].
 	command := exec.Command(os.Args[0], "-test.run=^TestDaemonRunStopsOnSignals$")
 	command.Env = append(
@@ -71,45 +94,49 @@ func runDaemonSignalChild(t *testing.T, signal os.Signal) {
 		daemonSignalHelperEnv+"=1",
 		daemonSignalRuntimeEnv+"="+runtimeDir,
 	)
+	command.Stdout = output
+	command.Stderr = output
 
-	var output bytes.Buffer
-	command.Stdout = &output
-	command.Stderr = &output
+	child := &daemonSignalChild{
+		command: command,
+		done:    make(chan struct{}),
+		output:  output,
+	}
 	if err := command.Start(); err != nil {
 		t.Fatalf("start daemon child: %v", err)
 	}
-
-	waitDone := make(chan error, 1)
 	go func() {
-		waitDone <- command.Wait()
+		child.waitErr = command.Wait()
+		close(child.done)
 	}()
 	t.Cleanup(func() {
 		_ = command.Process.Kill()
 		select {
-		case <-waitDone:
-		default:
+		case <-child.done:
+		case <-time.After(time.Second):
 		}
 	})
+	return child
+}
 
-	waitForDaemonRuntime(t, runtimeDir)
-	if err := command.Process.Signal(signal); err != nil {
-		t.Fatalf("send %s: %v", signal, err)
-	}
+func (child *daemonSignalChild) waitForExit(t *testing.T, signal os.Signal) {
+	t.Helper()
 
 	select {
-	case err := <-waitDone:
-		if err != nil {
-			t.Fatalf("daemon exit after %s: %v\n%s", signal, err, output.String())
+	case <-child.done:
+		if child.waitErr != nil {
+			t.Fatalf("daemon exit after %s: %v\n%s", signal, child.waitErr, child.output.String())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("daemon did not exit after %s", signal)
 	}
+}
 
-	if _, err := os.Stat(supervisor.RuntimePath(runtimeDir)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("runtime after %s error = %v, want removed", signal, err)
-	}
-	if _, err := os.Stat(supervisor.SocketPath(runtimeDir)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("socket after %s error = %v, want removed", signal, err)
+func assertDaemonPathRemoved(t *testing.T, signal os.Signal, name string, path string) {
+	t.Helper()
+
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%s after %s error = %v, want removed", name, signal, err)
 	}
 }
 
