@@ -7,7 +7,7 @@ import (
 	"github.com/go-rod/rod/lib/launcher/flags"
 )
 
-func TestNewRodPersistentChromeLauncherUsesNonManagedSafePersistentFlags(t *testing.T) {
+func TestNewRodPersistentChromeLauncherUsesLeakless(t *testing.T) {
 	t.Setenv("ROD_NO_SANDBOX", "")
 	dataDir := t.TempDir()
 
@@ -23,8 +23,8 @@ func TestNewRodPersistentChromeLauncherUsesNonManagedSafePersistentFlags(t *test
 	if chromeLauncher.Has(flags.KeepUserDataDir) {
 		t.Fatal("KeepUserDataDir flag is set, want non-managed launcher without managed-only flag")
 	}
-	if chromeLauncher.Has(flags.Leakless) {
-		t.Fatal("Leakless flag is set, want Chrome to survive CLI process exit")
+	if !chromeLauncher.Has(flags.Leakless) {
+		t.Fatal("Leakless flag is not set, want Chrome owned by the daemon guard")
 	}
 	if chromeLauncher.Has(flags.Headless) {
 		t.Fatal("Headless flag is set, want visible browser when Show is true")
