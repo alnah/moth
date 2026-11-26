@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const allLockBytes = ^uint32(0)
+const allBytes uint32 = ^uint32(0)
 
 type runtimeLock struct {
 	file       *os.File
@@ -29,16 +29,7 @@ func acquireRuntimeLock(runtimeDir string) (*runtimeLock, error) {
 	}
 
 	lock := &runtimeLock{file: file}
-	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)
-	err = windows.LockFileEx(
-		windows.Handle(file.Fd()),
-		flags,
-		0,
-		allLockBytes,
-		allLockBytes,
-		&lock.overlapped,
-	)
-	if err != nil {
+	if err := lock.lock(); err != nil {
 		_ = file.Close()
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 			return nil, ErrDaemonAlreadyRunning
@@ -48,20 +39,36 @@ func acquireRuntimeLock(runtimeDir string) (*runtimeLock, error) {
 	return lock, nil
 }
 
+func (lock *runtimeLock) lock() error {
+	const flags = windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY
+	return windows.LockFileEx(
+		windows.Handle(lock.file.Fd()),
+		uint32(flags),
+		0,
+		allBytes,
+		allBytes,
+		&lock.overlapped,
+	)
+}
+
 func (lock *runtimeLock) Close() error {
 	if lock == nil || lock.file == nil {
 		return nil
 	}
-	unlockErr := windows.UnlockFileEx(
-		windows.Handle(lock.file.Fd()),
-		0,
-		allLockBytes,
-		allLockBytes,
-		&lock.overlapped,
-	)
+	unlockErr := lock.unlock()
 	closeErr := lock.file.Close()
 	lock.file = nil
 	return errors.Join(unlockErr, closeErr)
+}
+
+func (lock *runtimeLock) unlock() error {
+	return windows.UnlockFileEx(
+		windows.Handle(lock.file.Fd()),
+		0,
+		allBytes,
+		allBytes,
+		&lock.overlapped,
+	)
 }
 
 func listen(ctx context.Context, runtimeDir string) (net.Listener, string, string, error) {
