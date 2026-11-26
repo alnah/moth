@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"runtime"
 
 	"github.com/alnah/moth/internal/browser"
@@ -11,6 +12,7 @@ import (
 	"github.com/alnah/moth/internal/limits"
 	"github.com/alnah/moth/internal/pdf2txt"
 	"github.com/alnah/moth/internal/podcast"
+	"github.com/alnah/moth/internal/supervisor"
 	"github.com/alnah/moth/internal/tools"
 	"github.com/alnah/moth/internal/transcription"
 	"github.com/alnah/moth/internal/webfetch"
@@ -122,7 +124,8 @@ type defaultDependencyOptions struct {
 
 type defaultDependencySet struct {
 	Dependencies
-	browserPool *browser.Pool
+	browserPool      *browser.Pool
+	supervisorClient *supervisor.Client
 }
 
 type defaultDependencyRuntime struct {
@@ -179,10 +182,14 @@ func (runtime *defaultDependencyRuntime) fill(deps *Dependencies) {
 }
 
 func (runtime *defaultDependencyRuntime) closeBrowserPool() error {
-	if runtime.set.browserPool == nil {
-		return nil
+	var errs []error
+	if runtime.set.supervisorClient != nil {
+		errs = append(errs, runtime.set.supervisorClient.Close())
 	}
-	return runtime.set.browserPool.Close()
+	if runtime.set.browserPool != nil {
+		errs = append(errs, runtime.set.browserPool.Close())
+	}
+	return errors.Join(errs...)
 }
 
 var defaultDependencyFactory = defaultDependencies
@@ -196,6 +203,11 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 		BrowserBin: browserBin,
 		Stateless:  browserPool,
 	})
+	supervisorClient := supervisor.NewClient(supervisor.ClientOptions{
+		Version:     version,
+		BrowserBin:  browserBin,
+		CommandFunc: startDaemonProcess,
+	})
 
 	ytdlpToolPath := resolvedYTDLPPath()
 
@@ -205,7 +217,9 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 				Credentials: credentials,
 				HTTPClient:  retryingHTTPClient,
 			}),
-			WebFetch: webfetch.New(webfetch.Options{BrowserFetcher: poolBrowserFetcher{pool: browserPool}}),
+			WebFetch: webfetch.New(webfetch.Options{
+				BrowserFetcher: supervisorBrowserFetcher{client: supervisorClient},
+			}),
 			YouTube: youtube.NewClient(youtube.Config{
 				Credentials: credentials,
 				HTTPClient:  retryingHTTPClient,
@@ -228,7 +242,8 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 			Tools:   toolsAdapter{},
 			Browser: browserService,
 		},
-		browserPool: browserPool,
+		browserPool:      browserPool,
+		supervisorClient: supervisorClient,
 	}
 }
 
@@ -283,30 +298,6 @@ func dependenciesComplete(deps Dependencies) bool {
 		deps.Transcription != nil &&
 		deps.Tools != nil &&
 		deps.Browser != nil
-}
-
-type poolBrowserFetcher struct {
-	pool *browser.Pool
-}
-
-func (fetcher poolBrowserFetcher) FetchRenderedPage(
-	ctx context.Context,
-	request webfetch.BrowserRequest,
-) (webfetch.BrowserResponse, error) {
-	if request.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, request.Timeout)
-		defer cancel()
-	}
-
-	loadedPage, err := fetcher.pool.FetchRenderedPage(ctx, browser.PageRequest{
-		URL:      request.URL,
-		MaxBytes: request.MaxBytes,
-	})
-	if err != nil {
-		return webfetch.BrowserResponse{}, err
-	}
-	return webfetch.BrowserResponse{URL: loadedPage.URL, ContentType: "text/html", HTML: loadedPage.HTML}, nil
 }
 
 type pdf2TextAdapter struct{}

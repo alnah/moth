@@ -25,7 +25,7 @@ func newShortRuntimeDir(t *testing.T) string {
 	return dir
 }
 
-func startTestDaemon(t *testing.T, runtimeDir string) *testDaemon {
+func startTestDaemon(t *testing.T, runtimeDir string) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -41,13 +41,12 @@ func startTestDaemon(t *testing.T, runtimeDir string) *testDaemon {
 	for time.Now().Before(deadline) {
 		if _, err := supervisor.ReadRuntime(runtimeDir); err == nil {
 			t.Cleanup(func() { daemon.stop(t) })
-			return daemon
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
 	t.Fatal("daemon runtime did not become ready")
-	return nil
 }
 
 func (daemon *testDaemon) stop(t *testing.T) {

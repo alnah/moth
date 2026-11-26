@@ -21,7 +21,7 @@ func TestServerFetchRenderedReturnsHTMLAndForwardsRequest(t *testing.T) {
 	worker := newFakePoolWorker(`<html><title>ok</title></html>`)
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithPool(t, runtimeDir, testVersion, pool)
+	_ = startDaemonWithPool(t, runtimeDir, pool)
 	runtime := readRuntime(t, runtimeDir)
 
 	reply := callDaemon(t, runtime, supervisor.MethodFetchRendered, supervisor.FetchRenderedParams{
@@ -59,7 +59,7 @@ func TestServerFetchRenderedWithoutPoolReportsMethodFailure(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
 
-	response := postCallAt(
+	response := postCallAt( //nolint:bodyclose // decodeReply closes the body.
 		t,
 		httpServer.Client(),
 		httpServer.URL,
@@ -80,7 +80,7 @@ func TestServerFetchRenderedWorkerFailureReportsMethodFailure(t *testing.T) {
 	worker.err = errors.New("worker exploded")
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithPool(t, runtimeDir, testVersion, pool)
+	_ = startDaemonWithPool(t, runtimeDir, pool)
 	runtime := readRuntime(t, runtimeDir)
 
 	reply := callDaemon(t, runtime, supervisor.MethodFetchRendered, supervisor.FetchRenderedParams{
@@ -101,7 +101,7 @@ func TestServerFetchRenderedRejectsInvalidParams(t *testing.T) {
 	worker := newFakePoolWorker("<html></html>")
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithPool(t, runtimeDir, testVersion, pool)
+	_ = startDaemonWithPool(t, runtimeDir, pool)
 	runtime := readRuntime(t, runtimeDir)
 
 	tests := []struct {
@@ -135,7 +135,7 @@ func TestServerCloseClosesPool(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
 
-	response := postCallAt(
+	response := postCallAt( //nolint:bodyclose // decodeReply closes the body.
 		t,
 		httpServer.Client(),
 		httpServer.URL,
@@ -162,7 +162,7 @@ func TestClientFetchRendered(t *testing.T) {
 	worker := newFakePoolWorker(`<html><title>rendered</title></html>`)
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithPool(t, runtimeDir, testVersion, pool)
+	_ = startDaemonWithPool(t, runtimeDir, pool)
 
 	client := supervisor.NewClient(supervisor.ClientOptions{
 		RuntimeDir: runtimeDir,
@@ -237,7 +237,7 @@ func TestClientFetchRenderedReportsMethodFailure(t *testing.T) {
 	worker.err = errors.New("worker exploded")
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	_ = startDaemonWithPool(t, runtimeDir, testVersion, pool)
+	_ = startDaemonWithPool(t, runtimeDir, pool)
 
 	client := supervisor.NewClient(supervisor.ClientOptions{
 		RuntimeDir: runtimeDir,
@@ -257,7 +257,18 @@ func TestRunWithInjectedPoolClosesPool(t *testing.T) {
 	worker := newFakePoolWorker("<html></html>")
 	pool := newFakePool(worker)
 	runtimeDir := newRuntimeDir(t)
-	daemon := startDaemonWithPool(t, runtimeDir, testVersion, pool)
+	daemon := startDaemonWithPool(t, runtimeDir, pool)
+
+	client := supervisor.NewClient(supervisor.ClientOptions{
+		RuntimeDir: runtimeDir,
+		Version:    testVersion,
+	})
+	if _, err := client.FetchRenderedPage(context.Background(), browser.PageRequest{
+		URL: "https://example.test",
+	}); err != nil {
+		t.Fatalf("FetchRenderedPage() error = %v", err)
+	}
+	_ = client.Close()
 
 	if err := daemon.stop(); err != nil {
 		t.Fatalf("stop daemon: %v", err)

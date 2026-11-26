@@ -35,7 +35,8 @@ func TestDaemonCommandRejectsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := daemonCommand(ctx, supervisor.DaemonSpec{RuntimeDir: "/tmp/moth-run"}); !errors.Is(err, context.Canceled) {
+	_, err := daemonCommand(ctx, supervisor.DaemonSpec{RuntimeDir: "/tmp/moth-run"})
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("daemonCommand(canceled) error = %v, want context.Canceled", err)
 	}
 }

@@ -4,9 +4,17 @@ import (
 	"github.com/alnah/moth/internal/browser"
 	"github.com/alnah/moth/internal/content"
 	"github.com/alnah/moth/internal/podcast"
+	"github.com/alnah/moth/internal/supervisor"
 	"github.com/alnah/moth/internal/transcription"
 	"github.com/alnah/moth/internal/ytdlp"
 )
+
+type daemonStatusDocument struct {
+	Type     string             `json:"type"`
+	Status   string             `json:"status"`
+	Health   *supervisor.Health `json:"health,omitempty"`
+	Warnings []content.Warning  `json:"warnings"`
+}
 
 type browserStatusDocument struct {
 	Type     string                `json:"type"`
@@ -48,6 +56,15 @@ type browserChallengeDocument struct {
 	Type      string                        `json:"type"`
 	Challenge browser.ManualChallengeResult `json:"challenge"`
 	Warnings  []content.Warning             `json:"warnings"`
+}
+
+func daemonStatusResult(status string, health *supervisor.Health) daemonStatusDocument {
+	return daemonStatusDocument{
+		Type:     "daemon_status",
+		Status:   status,
+		Health:   health,
+		Warnings: []content.Warning{},
+	}
 }
 
 func browserStatusResult(status browser.BrowserStatus) browserStatusDocument {

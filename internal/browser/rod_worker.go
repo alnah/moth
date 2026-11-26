@@ -40,24 +40,7 @@ func newRodWorker(ctx context.Context, config poolConfig) (*rodWorker, error) {
 	}
 
 	workerOptions := config.workerOptions()
-	browserLauncher := launcher.New().
-		Context(ctx).
-		Headless(config.headless).
-		Leakless(false).
-		Set(flags.Flag("disable-gpu"))
-	if browserBin != "" {
-		browserLauncher = browserLauncher.Bin(browserBin)
-	}
-	if config.noSandbox || os.Getenv("ROD_NO_SANDBOX") == "1" {
-		browserLauncher = browserLauncher.NoSandbox(true)
-	}
-	if config.proxyURL != "" {
-		browserLauncher = browserLauncher.Proxy(config.proxyURL)
-	}
-	if userDataDir != "" {
-		browserLauncher = browserLauncher.UserDataDir(userDataDir)
-	}
-
+	browserLauncher := newRodChromeLauncher(ctx, config, browserBin)
 	controlURL, err := browserLauncher.Launch()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -81,6 +64,27 @@ func newRodWorker(ctx context.Context, config poolConfig) (*rodWorker, error) {
 		options:  workerOptions,
 		sessions: make(map[string]*rodSession),
 	}, nil
+}
+
+func newRodChromeLauncher(ctx context.Context, config poolConfig, browserBin string) *launcher.Launcher {
+	browserLauncher := launcher.New().
+		Context(ctx).
+		Headless(config.headless).
+		Leakless(true).
+		Set(flags.Flag("disable-gpu"))
+	if browserBin != "" {
+		browserLauncher = browserLauncher.Bin(browserBin)
+	}
+	if config.noSandbox || os.Getenv("ROD_NO_SANDBOX") == "1" {
+		browserLauncher = browserLauncher.NoSandbox(true)
+	}
+	if config.proxyURL != "" {
+		browserLauncher = browserLauncher.Proxy(config.proxyURL)
+	}
+	if userDataDir := config.userDataDir(); userDataDir != "" {
+		browserLauncher = browserLauncher.UserDataDir(userDataDir)
+	}
+	return browserLauncher
 }
 
 func resolvedBrowserBin(path string) string {

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alnah/moth/internal/browser"
 )
 
 type daemonProcess struct {
@@ -22,7 +24,7 @@ type daemonProcess struct {
 }
 
 // Run starts a daemon and blocks until its context or a shutdown request.
-func Run(ctx context.Context, options RunOptions) error {
+func Run(ctx context.Context, options RunOptions) (runErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -31,7 +33,9 @@ func Run(ctx context.Context, options RunOptions) error {
 	if err != nil {
 		return err
 	}
-	defer daemon.close()
+	defer func() {
+		runErr = errors.Join(runErr, daemon.close())
+	}()
 	return daemon.wait(ctx)
 }
 
@@ -63,7 +67,7 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 	cleanup := true
 	defer func() {
 		if cleanup {
-			daemon.closeResources()
+			_ = daemon.close()
 		}
 	}()
 
@@ -72,11 +76,17 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		return nil, err
 	}
 	startedAt := time.Now().UTC()
+	pool := options.Pool
+	if pool == nil {
+		pool = browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(options.BrowserBin))
+	}
 	server := NewServer(ServerOptions{
 		Version:   options.Version,
 		Token:     token,
 		StartedAt: startedAt,
+		Pool:      pool,
 	})
+	daemon.server = server
 	httpServer := &http.Server{
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -96,7 +106,6 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 	}
 
 	daemon.httpServer = httpServer
-	daemon.server = server
 	daemon.serveErr = make(chan error, 1)
 	go func() {
 		daemon.serveErr <- httpServer.Serve(listener)
@@ -124,9 +133,14 @@ func (daemon *daemonProcess) wait(ctx context.Context) error {
 	return nil
 }
 
-func (daemon *daemonProcess) close() {
+func (daemon *daemonProcess) close() error {
 	removeRuntime(daemon.runtimeDir)
+	var closeErr error
+	if daemon.server != nil {
+		closeErr = daemon.server.Close()
+	}
 	daemon.closeResources()
+	return closeErr
 }
 
 func (daemon *daemonProcess) closeResources() {
@@ -136,6 +150,11 @@ func (daemon *daemonProcess) closeResources() {
 	if daemon.lock != nil {
 		_ = daemon.lock.Close()
 	}
+}
+
+// DefaultRuntimeDir returns the per-user daemon runtime directory.
+func DefaultRuntimeDir() string {
+	return defaultRuntimeDir()
 }
 
 func defaultRuntimeDir() string {

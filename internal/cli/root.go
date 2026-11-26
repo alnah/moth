@@ -11,6 +11,7 @@ import (
 	"github.com/alnah/moth/internal/browser"
 	"github.com/alnah/moth/internal/config"
 	"github.com/alnah/moth/internal/limits"
+	"github.com/alnah/moth/internal/supervisor"
 )
 
 // ErrUnknownCommand reports a command name that is not registered.
@@ -83,7 +84,9 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 			if err := loadConfigBeforeExecution(cmd, options); err != nil {
 				return renderCommandError(cmd, options.Output, err)
 			}
-			dependencyRuntime.fill(&deps)
+			if !commandSkipsDependencies(cmd) {
+				dependencyRuntime.fill(&deps)
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -122,6 +125,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	addSearchCommand(cmd, options, &deps)
 	addFetchCommand(cmd, options, &deps)
 	addBrowserCommand(cmd, options, &deps)
+	addDaemonCommand(cmd, options)
 	addYouTubeCommand(cmd, options, &deps)
 	addPodcastCommand(cmd, options, &deps)
 	addXCommand(cmd, options, &deps)
@@ -197,6 +201,10 @@ func persistentFlagChanged(root *cobra.Command, name string) bool {
 	return flag != nil && flag.Changed
 }
 
+func commandSkipsDependencies(cmd *cobra.Command) bool {
+	return cmd.Annotations["moth.no_dependencies"] == "true"
+}
+
 func newCommandError(code string, message string, cause error, writeContext string) error {
 	return &commandError{
 		cause:        cause,
@@ -250,6 +258,24 @@ func commandErrorFields(err error) (string, string, string) {
 	var commandErr *commandError
 	if errors.As(err, &commandErr) {
 		return commandErr.code, commandErr.message, commandErr.writeContext
+	}
+	if errors.Is(err, supervisor.ErrDaemonUnavailable) {
+		return "daemon_unavailable", err.Error(), "write daemon error"
+	}
+	if errors.Is(err, supervisor.ErrDaemonVersion) {
+		return "daemon_version_mismatch", err.Error(), "write daemon error"
+	}
+	if errors.Is(err, supervisor.ErrDaemonAuth) {
+		return "daemon_unauthorized", err.Error(), "write daemon error"
+	}
+	if errors.Is(err, supervisor.ErrDaemonProtocol) {
+		return "daemon_protocol_error", err.Error(), "write daemon error"
+	}
+	if errors.Is(err, supervisor.ErrDaemonMethod) {
+		return "daemon_method_failed", err.Error(), "write daemon error"
+	}
+	if errors.Is(err, supervisor.ErrDaemonAlreadyRunning) {
+		return "daemon_already_running", err.Error(), "write daemon error"
 	}
 	if errors.Is(err, browser.ErrBrowserStateUnavailable) {
 		return "browser_state_unavailable", err.Error(), "write browser state error"

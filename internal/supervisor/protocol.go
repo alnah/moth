@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/alnah/moth/internal/browser"
 )
 
 const (
@@ -16,16 +18,21 @@ const (
 	MethodHealth = "daemon.health"
 	// MethodShutdown asks the daemon to stop.
 	MethodShutdown = "daemon.shutdown"
+	// MethodFetchRendered fetches one rendered page through the daemon pool.
+	MethodFetchRendered = "browser.fetch-rendered"
 
 	// CodeProtocolError reports malformed or unsupported requests.
 	CodeProtocolError = "daemon_protocol_error"
 	// CodeMethodNotFound reports an unknown daemon method.
 	CodeMethodNotFound = "method_not_found"
+	// CodeMethodFailed reports a valid daemon method that failed.
+	CodeMethodFailed = "daemon_method_failed"
 	// CodeUnauthorized reports a missing or invalid daemon token.
 	CodeUnauthorized = "daemon_unauthorized"
 
 	daemonProbeAttempts = 2
 	maxRequestBody      = 1 << 20
+	maxResponseBody     = 64 << 20
 
 	defaultHealthTimeout = 2 * time.Second
 	defaultShutdownWait  = 5 * time.Second
@@ -43,6 +50,8 @@ var (
 	ErrDaemonAlreadyRunning = errors.New("daemon already running")
 	// ErrDaemonProtocol reports a malformed daemon response.
 	ErrDaemonProtocol = errors.New("daemon protocol error")
+	// ErrDaemonMethod reports a valid daemon method that failed.
+	ErrDaemonMethod = errors.New("daemon method failed")
 )
 
 // Runtime describes the durable endpoint and credentials of a running daemon.
@@ -82,6 +91,20 @@ type CallError struct {
 	Message string `json:"message"`
 }
 
+// FetchRenderedParams describes one rendered-page request.
+type FetchRenderedParams struct {
+	URL       string            `json:"url"`
+	MaxBytes  int64             `json:"max_bytes,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	UserAgent string            `json:"user_agent,omitempty"`
+}
+
+// FetchRenderedResult contains one rendered page.
+type FetchRenderedResult struct {
+	URL  string `json:"url"`
+	HTML string `json:"html"`
+}
+
 // Endpoint identifies a daemon socket and bearer token.
 type Endpoint struct {
 	Network string
@@ -112,6 +135,7 @@ type RunOptions struct {
 	Version     string
 	BrowserBin  string
 	IdleTimeout time.Duration
+	Pool        *browser.Pool
 }
 
 // ServerOptions configures a daemon HTTP server.
@@ -120,4 +144,5 @@ type ServerOptions struct {
 	Token     string
 	StartedAt time.Time
 	Clock     func() time.Time
+	Pool      *browser.Pool
 }

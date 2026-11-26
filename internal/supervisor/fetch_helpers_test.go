@@ -99,10 +99,10 @@ func launchDaemonWithPool(runtimeDir string, version string, pool *browser.Pool)
 	return daemon, nil
 }
 
-func startDaemonWithPool(t *testing.T, runtimeDir string, version string, pool *browser.Pool) *inProcessDaemon {
+func startDaemonWithPool(t *testing.T, runtimeDir string, pool *browser.Pool) *inProcessDaemon {
 	t.Helper()
 
-	daemon, err := launchDaemonWithPool(runtimeDir, version, pool)
+	daemon, err := launchDaemonWithPool(runtimeDir, testVersion, pool)
 	if err != nil {
 		t.Fatalf("start daemon with pool at %q: %v", runtimeDir, err)
 	}

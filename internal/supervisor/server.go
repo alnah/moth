@@ -1,16 +1,20 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alnah/moth/internal/browser"
 )
 
 type methodHandler func(context.Context, json.RawMessage) (json.RawMessage, error)
@@ -20,6 +24,7 @@ type Server struct {
 	version   string
 	token     string
 	startedAt time.Time
+	pool      *browser.Pool
 	handlers  map[string]methodHandler
 
 	shutdownOnce sync.Once
@@ -40,11 +45,13 @@ func NewServer(options ServerOptions) *Server {
 		version:    options.Version,
 		token:      options.Token,
 		startedAt:  startedAt,
+		pool:       options.Pool,
 		handlers:   make(map[string]methodHandler),
 		shutdownCh: make(chan struct{}),
 	}
 	server.handlers[MethodHealth] = server.handleHealth
 	server.handlers[MethodShutdown] = server.handleShutdown
+	server.handlers[MethodFetchRendered] = server.handleFetchRendered
 	return server
 }
 
@@ -59,6 +66,14 @@ func (server *Server) Handler() http.Handler {
 func (server *Server) Shutdown(context.Context) error {
 	server.requestShutdown()
 	return nil
+}
+
+// Close releases browser resources owned by the server.
+func (server *Server) Close() error {
+	if server.pool == nil {
+		return nil
+	}
+	return server.pool.Close()
 }
 
 func (server *Server) done() <-chan struct{} {
@@ -116,9 +131,12 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 
 	result, err := server.dispatch(request.Context(), call)
 	if err != nil {
-		code := CodeProtocolError
-		if errors.Is(err, errMethodNotFound) {
+		code := CodeMethodFailed
+		switch {
+		case errors.Is(err, errMethodNotFound):
 			code = CodeMethodNotFound
+		case errors.Is(err, errInvalidParams):
+			code = CodeProtocolError
 		}
 		writeReply(writer, http.StatusOK, Reply{
 			Error: &CallError{
@@ -161,6 +179,33 @@ func (server *Server) handleShutdown(context.Context, json.RawMessage) (json.Raw
 	return marshalResult(server.health())
 }
 
+func (server *Server) handleFetchRendered(
+	ctx context.Context,
+	raw json.RawMessage,
+) (json.RawMessage, error) {
+	var params FetchRenderedParams
+	if err := decodeParams(raw, &params); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.URL) == "" {
+		return nil, fmt.Errorf("%w: url is required", errInvalidParams)
+	}
+	if server.pool == nil {
+		return nil, errors.New("browser pool unavailable")
+	}
+
+	page, err := server.pool.FetchRenderedPage(ctx, browser.PageRequest{
+		URL:       params.URL,
+		MaxBytes:  params.MaxBytes,
+		Headers:   params.Headers,
+		UserAgent: params.UserAgent,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fetch rendered page: %w", err)
+	}
+	return marshalResult(FetchRenderedResult{URL: page.URL, HTML: page.HTML})
+}
+
 func (server *Server) health() Health {
 	return Health{
 		Status:         "ok",
@@ -185,4 +230,27 @@ func writeReply(writer http.ResponseWriter, status int, reply Reply) {
 	_ = json.NewEncoder(writer).Encode(reply)
 }
 
-var errMethodNotFound = errors.New("method not found")
+func decodeParams(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("%w: missing params", errInvalidParams)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("%w: %w", errInvalidParams, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("%w: trailing JSON document", errInvalidParams)
+		}
+		return fmt.Errorf("%w: %w", errInvalidParams, err)
+	}
+	return nil
+}
+
+var (
+	errMethodNotFound = errors.New("method not found")
+	errInvalidParams  = errors.New("invalid params")
+)

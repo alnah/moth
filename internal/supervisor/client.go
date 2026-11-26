@@ -12,6 +12,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/alnah/moth/internal/browser"
 )
 
 // Client talks to the local Moth daemon.
@@ -25,6 +27,9 @@ type Client struct {
 
 // NewClient creates a daemon client.
 func NewClient(options ClientOptions) *Client {
+	if options.RuntimeDir == "" {
+		options.RuntimeDir = DefaultRuntimeDir()
+	}
 	return &Client{options: options}
 }
 
@@ -240,9 +245,42 @@ func (client *Client) healthLocked(ctx context.Context) (Health, error) {
 	return health, nil
 }
 
+// FetchRenderedPage fetches one rendered page through the daemon.
+func (client *Client) FetchRenderedPage(
+	ctx context.Context,
+	request browser.PageRequest,
+) (browser.LoadedPage, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
+	if _, err := client.ensureLocked(ctx); err != nil {
+		return browser.LoadedPage{}, err
+	}
+
+	var result FetchRenderedResult
+	if err := client.callWithParamsLocked(ctx, MethodFetchRendered, FetchRenderedParams{
+		URL:       request.URL,
+		MaxBytes:  request.MaxBytes,
+		Headers:   request.Headers,
+		UserAgent: request.UserAgent,
+	}, &result); err != nil {
+		return browser.LoadedPage{}, err
+	}
+	return browser.LoadedPage{URL: result.URL, HTML: result.HTML}, nil
+}
+
 func (client *Client) callLocked(
 	ctx context.Context,
 	method string,
+	result any,
+) error {
+	return client.callWithParamsLocked(ctx, method, nil, result)
+}
+
+func (client *Client) callWithParamsLocked(
+	ctx context.Context,
+	method string,
+	params any,
 	result any,
 ) error {
 	if client.endpoint == nil {
@@ -252,7 +290,15 @@ func (client *Client) callLocked(
 		client.httpClient = client.newHTTPClientLocked()
 	}
 
-	payload, err := json.Marshal(Call{Method: method})
+	call := Call{Method: method}
+	if params != nil {
+		encodedParams, err := json.Marshal(params)
+		if err != nil {
+			return fmt.Errorf("encode daemon params: %w", err)
+		}
+		call.Params = encodedParams
+	}
+	payload, err := json.Marshal(call)
 	if err != nil {
 		return fmt.Errorf("encode daemon call: %w", err)
 	}
@@ -297,8 +343,20 @@ func statusError(status int) error {
 }
 
 func decodeCallReply(body io.Reader, result any) error {
+	return decodeCallReplyLimit(body, maxResponseBody, result)
+}
+
+func decodeCallReplyLimit(body io.Reader, limit int64, result any) error {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return fmt.Errorf("%w: read reply: %w", ErrDaemonProtocol, err)
+	}
+	if int64(len(data)) > limit {
+		return fmt.Errorf("%w: response exceeds %d bytes", ErrDaemonProtocol, limit)
+	}
+
 	var reply Reply
-	if err := json.NewDecoder(io.LimitReader(body, maxRequestBody)).Decode(&reply); err != nil {
+	if err := json.Unmarshal(data, &reply); err != nil {
 		return fmt.Errorf("%w: decode reply: %w", ErrDaemonProtocol, err)
 	}
 	if reply.Error != nil {
@@ -322,6 +380,8 @@ func callReplyError(callErr *CallError) error {
 		return ErrDaemonAuth
 	case CodeProtocolError, CodeMethodNotFound:
 		return fmt.Errorf("%w: %s", ErrDaemonProtocol, callErr.Message)
+	case CodeMethodFailed:
+		return fmt.Errorf("%w: %s", ErrDaemonMethod, callErr.Message)
 	default:
 		return fmt.Errorf("%w: %s", ErrDaemonUnavailable, callErr.Message)
 	}

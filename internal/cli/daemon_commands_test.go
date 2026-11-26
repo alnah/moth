@@ -42,7 +42,7 @@ func TestDaemonStatusMissingRendersStatusJSON(t *testing.T) {
 
 func TestDaemonStatusRunningHidesToken(t *testing.T) {
 	runtimeDir := newShortRuntimeDir(t)
-	_ = startTestDaemon(t, runtimeDir)
+	startTestDaemon(t, runtimeDir)
 	runtime, err := supervisor.ReadRuntime(runtimeDir)
 	if err != nil {
 		t.Fatalf("read runtime: %v", err)
@@ -76,7 +76,7 @@ func TestDaemonStopMissingAndRunning(t *testing.T) {
 
 	t.Run("running", func(t *testing.T) {
 		runtimeDir := newShortRuntimeDir(t)
-		_ = startTestDaemon(t, runtimeDir)
+		startTestDaemon(t, runtimeDir)
 
 		stdout, stderr, err := executeRootCommand("daemon", "stop", "--runtime-dir", runtimeDir)
 		if err != nil {
