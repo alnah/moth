@@ -1,10 +1,10 @@
 //go:build !windows
 
+//nolint:gosec,lll // Server tests read temporary files and keep request tables explicit.
 package supervisor_test
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -337,7 +337,7 @@ func TestServerBrowserPagesResultIsArray(t *testing.T) {
 	}, headers)
 	decodeBrowserResult[supervisor.BrowserStatusResult](t, startReply)
 	pagesReply := callBrowserServer(t, httpServer, supervisor.MethodBrowserPages, supervisor.BrowserSessionParams{}, headers)
-	var raw json.RawMessage = pagesReply.Result
+	raw := pagesReply.Result
 	if len(raw) == 0 || raw[0] != '[' {
 		t.Fatalf("browser.pages result = %s, want JSON array", raw)
 	}

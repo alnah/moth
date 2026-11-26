@@ -2,11 +2,15 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
 )
 
@@ -49,19 +53,39 @@ func newRodPersistentChromeLauncher(ctx context.Context, request LaunchRequest, 
 type rodPersistentConnector struct{}
 
 func (rodPersistentConnector) ConnectBrowser(ctx context.Context, debugURL string) (BrowserConnection, error) {
-	rodBrowser := rod.New().ControlURL(debugURL).Context(ctx)
+	websocket := &cdp.WebSocket{}
+	if err := websocket.Connect(ctx, debugURL, nil); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, fmt.Errorf("connect browser websocket: %w", err)
+	}
+	client := cdp.New().Start(websocket)
+	rodBrowser := rod.New().ControlURL("").Client(client).Context(context.Background())
 	if err := rodBrowser.Connect(); err != nil {
+		_ = websocket.Close()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
 		return nil, fmt.Errorf("connect browser: %w", err)
 	}
-	worker := &rodWorker{browser: rodBrowser.Context(context.Background()), sessions: make(map[string]*rodSession)}
-	return &rodBrowserConnection{worker: worker}, nil
+	worker := &rodWorker{browser: rodBrowser, sessions: make(map[string]*rodSession)}
+	return &rodBrowserConnection{worker: worker, websocket: websocket}, nil
 }
 
 type rodBrowserConnection struct {
-	worker *rodWorker
+	worker         *rodWorker
+	websocket      *cdp.WebSocket
+	disconnectOnce sync.Once
+	disconnectErr  error
+}
+
+func (connection *rodBrowserConnection) Ping(ctx context.Context) error {
+	if connection.worker == nil || connection.worker.browser == nil {
+		return errors.New("browser connection unavailable")
+	}
+	_, err := connection.worker.browser.Context(ctx).Version()
+	return err
 }
 
 func (connection *rodBrowserConnection) OpenPage(ctx context.Context, request OpenPageRequest) (PageInfo, error) {
@@ -142,20 +166,36 @@ func (connection *rodBrowserConnection) Download(
 
 func (connection *rodBrowserConnection) Close(ctx context.Context) error {
 	if connection.worker == nil || connection.worker.browser == nil {
-		return nil
+		return connection.Disconnect(ctx)
 	}
 	done := make(chan error, 1)
 	go func() { done <- connection.worker.browser.Context(ctx).Close() }()
 	timer := time.NewTimer(browserCloseTimeout)
 	defer timer.Stop()
+
+	var closeErr error
 	select {
-	case err := <-done:
-		return err
+	case closeErr = <-done:
 	case <-ctx.Done():
-		return ctx.Err()
+		closeErr = ctx.Err()
 	case <-timer.C:
-		return nil
+		closeErr = context.DeadlineExceeded
 	}
+	return errors.Join(closeErr, connection.Disconnect(ctx))
+}
+
+func (connection *rodBrowserConnection) Disconnect(context.Context) error {
+	connection.disconnectOnce.Do(func() {
+		if connection.websocket == nil {
+			return
+		}
+		err := connection.websocket.Close()
+		if errors.Is(err, net.ErrClosed) {
+			return
+		}
+		connection.disconnectErr = err
+	})
+	return connection.disconnectErr
 }
 
 func (connection *rodBrowserConnection) hydrateSession(

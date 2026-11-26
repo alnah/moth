@@ -91,12 +91,13 @@ func startDaemon(ctx context.Context, options RunOptions) (*daemonProcess, error
 		pool = browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(options.BrowserBin))
 	}
 	server := NewServer(ServerOptions{
-		Version:   options.Version,
-		Token:     token,
-		StartedAt: startedAt,
-		Lifecycle: options.Lifecycle,
-		Logger:    options.Logger,
-		Pool:      pool,
+		Version:    options.Version,
+		Token:      token,
+		StartedAt:  startedAt,
+		Lifecycle:  options.Lifecycle,
+		Logger:     options.Logger,
+		Pool:       pool,
+		BrowserBin: options.BrowserBin,
 	})
 	daemon.server = server
 	httpServer, cancelRequests := newDaemonHTTPServer(server.Handler())

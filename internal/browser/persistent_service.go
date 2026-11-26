@@ -45,7 +45,9 @@ type BrowserConnection interface {
 	Wait(context.Context, WaitRequest) error
 	AccessibilityTree(context.Context, AccessibilityRequest) (AccessibilityTree, error)
 	DetectManualChallenge(context.Context, ManualChallengeRequest) (ManualChallengeResult, error)
+	Ping(context.Context) error
 	Close(context.Context) error
+	Disconnect(context.Context) error
 }
 
 type persistentDownloadConnection interface {
@@ -61,30 +63,32 @@ type StatelessBrowserService interface {
 
 // PersistentServiceOptions configures the persistent browser service.
 type PersistentServiceOptions struct {
-	StateDirs  StateDirs
-	Launcher   PersistentLauncher
-	Connector  PersistentConnector
-	HTTPClient *http.Client
-	Clock      func() time.Time
-	Stateless  StatelessBrowserService
-	BrowserBin string
-	NoSandbox  bool
-	Lifecycle  LifecycleOptions
+	StateDirs        StateDirs
+	Launcher         PersistentLauncher
+	Connector        PersistentConnector
+	HTTPClient       *http.Client
+	Clock            func() time.Time
+	Stateless        StatelessBrowserService
+	BrowserBin       string
+	NoSandbox        bool
+	Lifecycle        LifecycleOptions
+	TerminateProcess func(int) error
 }
 
 // PersistentService stores short-lived CLI browser state and reconnects per command.
 type PersistentService struct {
-	stateDirs   StateDirs
-	launcher    PersistentLauncher
-	connector   PersistentConnector
-	httpClient  *http.Client
-	clock       func() time.Time
-	stateless   StatelessBrowserService
-	browserBin  string
-	noSandbox   bool
-	lifecycle   LifecycleOptions
-	browsers    map[string]*browserRecord
-	connections map[string]cachedBrowserConnection
+	stateDirs        StateDirs
+	launcher         PersistentLauncher
+	connector        PersistentConnector
+	httpClient       *http.Client
+	clock            func() time.Time
+	stateless        StatelessBrowserService
+	browserBin       string
+	noSandbox        bool
+	lifecycle        LifecycleOptions
+	terminateProcess func(int) error
+	browsers         map[string]*browserRecord
+	connections      map[string]cachedBrowserConnection
 }
 
 // NewPersistentService creates a service for cross-process browser commands.
@@ -94,17 +98,18 @@ func NewPersistentService(options PersistentServiceOptions) *PersistentService {
 		stateDirs = defaultStateDirs()
 	}
 	service := &PersistentService{
-		stateDirs:   stateDirs,
-		launcher:    options.Launcher,
-		connector:   options.Connector,
-		httpClient:  options.HTTPClient,
-		clock:       options.Clock,
-		stateless:   options.Stateless,
-		browserBin:  options.BrowserBin,
-		noSandbox:   options.NoSandbox,
-		lifecycle:   options.Lifecycle.withDefaults(),
-		browsers:    make(map[string]*browserRecord),
-		connections: make(map[string]cachedBrowserConnection),
+		stateDirs:        stateDirs,
+		launcher:         options.Launcher,
+		connector:        options.Connector,
+		httpClient:       options.HTTPClient,
+		clock:            options.Clock,
+		stateless:        options.Stateless,
+		browserBin:       options.BrowserBin,
+		noSandbox:        options.NoSandbox,
+		lifecycle:        options.Lifecycle.withDefaults(),
+		terminateProcess: options.TerminateProcess,
+		browsers:         make(map[string]*browserRecord),
+		connections:      make(map[string]cachedBrowserConnection),
 	}
 	if service.launcher == nil {
 		service.launcher = rodPersistentLauncher{}
@@ -125,14 +130,24 @@ func NewPersistentService(options PersistentServiceOptions) *PersistentService {
 func (service *PersistentService) Start(ctx context.Context, request StartRequest) (BrowserStatus, error) {
 	scope := service.writeScope(request.Scope)
 	state, readErr := service.loadState(scope)
-	if readErr == nil {
+	switch {
+	case readErr == nil:
 		if _, connectErr := service.connectAndCache(ctx, scope, state.DebugURL); connectErr == nil {
 			service.touchBrowser(scope, service.clock(), state.Owned)
 			return state.status("running"), nil
+		} else if ctxErr := ctx.Err(); ctxErr != nil {
+			return BrowserStatus{}, ctxErr
 		}
 		service.invalidateConnection(scope)
-	} else if !errors.Is(readErr, os.ErrNotExist) && !errors.Is(readErr, ErrBrowserStateCorrupt) {
+		if state.Owned {
+			if err := service.terminateOwned(ctx, state.ChromePID); err != nil {
+				return BrowserStatus{}, err
+			}
+		}
+	case !errors.Is(readErr, os.ErrNotExist) && !errors.Is(readErr, ErrBrowserStateCorrupt):
 		return BrowserStatus{}, readErr
+	default:
+		service.invalidateConnection(scope)
 	}
 
 	stateDir := service.stateDir(scope)
@@ -152,13 +167,24 @@ func (service *PersistentService) Start(ctx context.Context, request StartReques
 		ChromePID: result.ChromePID,
 		Owned:     true,
 		DataDir:   dataDir,
-		UpdatedAt: service.clock().UTC(),
 	}
-	if err := service.saveState(state); err != nil {
-		return BrowserStatus{}, err
+	connection, connectErr := service.connectAndCache(ctx, scope, state.DebugURL)
+	if saveErr := service.saveState(state); saveErr != nil {
+		service.invalidateConnection(scope)
+		service.deleteBrowser(scope)
+		if connectErr == nil {
+			closeErr := connection.Close(ctx)
+			return BrowserStatus{}, errors.Join(saveErr, closeErr)
+		}
+		termErr := service.terminateOwned(ctx, state.ChromePID)
+		return BrowserStatus{}, errors.Join(saveErr, termErr)
 	}
 	service.resetBrowser(scope, service.clock(), true)
-	_, _ = service.connectAndCache(ctx, scope, state.DebugURL)
+	// A saved state is usable even when the eager cache fill failed.
+	//nolint:nilerr // connection errors are retried by the next command.
+	if connectErr != nil {
+		return state.status("running"), nil
+	}
 	return state.status("running"), nil
 }
 
@@ -182,12 +208,28 @@ func (service *PersistentService) Stop(ctx context.Context, request StopRequest)
 			ok = true
 		}
 	}
-	if ok {
-		if state.Owned {
-			if closeErr := connection.Connection.Close(ctx); closeErr != nil {
-				return BrowserStatus{}, fmt.Errorf("close owned browser: %w", closeErr)
+	if state.Owned {
+		switch {
+		case ok:
+			closeErr := connection.Connection.Close(ctx)
+			if closeErr != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return BrowserStatus{}, fmt.Errorf("close owned browser: %w", ctxErr)
+				}
+				if termErr := service.terminateOwned(ctx, state.ChromePID); termErr != nil {
+					return BrowserStatus{}, errors.Join(
+						fmt.Errorf("close owned browser: %w", closeErr),
+						termErr,
+					)
+				}
 			}
-		} else if disconnectErr := disconnectConnection(ctx, connection.Connection); disconnectErr != nil {
+		default:
+			if termErr := service.terminateOwned(ctx, state.ChromePID); termErr != nil {
+				return BrowserStatus{}, termErr
+			}
+		}
+	} else if ok {
+		if disconnectErr := disconnectConnection(ctx, connection.Connection); disconnectErr != nil {
 			return BrowserStatus{}, fmt.Errorf("disconnect external browser: %w", disconnectErr)
 		}
 	}
@@ -211,10 +253,17 @@ func (service *PersistentService) Status(ctx context.Context, request StatusRequ
 	if err != nil {
 		return BrowserStatus{}, err
 	}
-	if _, connectErr := service.connector.ConnectBrowser(ctx, state.DebugURL); connectErr == nil {
-		return state.status("running"), nil
+	connection, connectErr := service.connectionFor(ctx, scope, state.DebugURL)
+	if connectErr != nil {
+		service.invalidateConnection(scope)
+		return state.status("stale"), nil //nolint:nilerr // stale state is a valid status.
 	}
-	return state.status("stale"), nil
+	if pingErr := connection.Ping(ctx); pingErr != nil {
+		_ = disconnectConnection(ctx, connection)
+		service.invalidateConnection(scope)
+		return state.status("stale"), nil //nolint:nilerr // stale state is a valid status.
+	}
+	return state.status("running"), nil
 }
 
 // Connect validates and stores an external browser debugger endpoint.
@@ -224,8 +273,15 @@ func (service *PersistentService) Connect(ctx context.Context, request ConnectRe
 	if err != nil {
 		return BrowserStatus{}, err
 	}
-	if _, err := service.connectAndCache(ctx, scope, debugURL); err != nil {
+	connection, err := service.connector.ConnectBrowser(ctx, debugURL)
+	if err != nil {
 		return BrowserStatus{}, fmt.Errorf("connect external browser: %w", err)
+	}
+	if oldState, readErr := service.loadState(scope); readErr == nil {
+		if closeErr := service.closeStateBrowser(ctx, oldState); closeErr != nil {
+			_ = disconnectConnection(ctx, connection)
+			return BrowserStatus{}, closeErr
+		}
 	}
 	state := persistentBrowserState{
 		Scope:     scope,
@@ -234,8 +290,11 @@ func (service *PersistentService) Connect(ctx context.Context, request ConnectRe
 		UpdatedAt: service.clock().UTC(),
 	}
 	if err := service.saveState(state); err != nil {
+		_ = disconnectConnection(ctx, connection)
+		service.invalidateConnection(scope)
 		return BrowserStatus{}, err
 	}
+	service.cacheConnection(scope, debugURL, connection)
 	service.resetBrowser(scope, service.clock(), false)
 	return state.status("running"), nil
 }
@@ -387,11 +446,39 @@ func (service *PersistentService) saveState(state persistentBrowserState) error 
 		return fmt.Errorf("encode browser state: %w", err)
 	}
 	dir := service.stateDir(state.Scope)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("create browser state directory: %w", err)
+	if mkdirErr := os.MkdirAll(dir, 0o750); mkdirErr != nil {
+		return fmt.Errorf("create browser state directory: %w", mkdirErr)
 	}
-	if err := os.WriteFile(filepath.Join(dir, persistentStateFileName), data, 0o600); err != nil {
+
+	temp, err := os.CreateTemp(dir, persistentStateFileName+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create browser state temporary file: %w", err)
+	}
+	tempPath := temp.Name()
+	cleanup := func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}
+	if err := temp.Chmod(0o600); err != nil {
+		cleanup()
+		return fmt.Errorf("secure browser state temporary file: %w", err)
+	}
+	if _, err := temp.Write(data); err != nil {
+		cleanup()
 		return fmt.Errorf("write browser state: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync browser state: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath) //nolint:gosec // temp path is created below the validated state directory.
+		return fmt.Errorf("close browser state: %w", err)
+	}
+	//nolint:gosec // tempPath is created by os.CreateTemp below the validated state directory.
+	if err := os.Rename(tempPath, filepath.Join(dir, persistentStateFileName)); err != nil {
+		_ = os.Remove(tempPath) //nolint:gosec // temp path is created below the validated state directory.
+		return fmt.Errorf("replace browser state: %w", err)
 	}
 	return nil
 }

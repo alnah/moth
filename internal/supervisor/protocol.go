@@ -126,6 +126,8 @@ type ClientOptions struct {
 	Version     string
 	BrowserBin  string
 	Executable  string
+	WorkingDir  string
+	StateDirs   browser.StateDirs
 	HTTPClient  *http.Client
 	CommandFunc func(context.Context, DaemonSpec) error
 }
@@ -142,13 +144,18 @@ type RunOptions struct {
 	Pool         *browser.Pool
 }
 
+// BrowserServiceFactory creates one persistent browser service.
+type BrowserServiceFactory func(browser.PersistentServiceOptions) *browser.PersistentService
+
 // ServerOptions configures a daemon HTTP server.
 type ServerOptions struct {
-	Version   string
-	Token     string
-	StartedAt time.Time
-	Clock     func() time.Time
-	Lifecycle browser.LifecycleOptions
-	Logger    *slog.Logger
-	Pool      *browser.Pool
+	Version                  string
+	Token                    string
+	StartedAt                time.Time
+	Clock                    func() time.Time
+	Lifecycle                browser.LifecycleOptions
+	Logger                   *slog.Logger
+	Pool                     *browser.Pool
+	BrowserBin               string
+	PersistentServiceFactory BrowserServiceFactory
 }

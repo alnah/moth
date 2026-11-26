@@ -1,5 +1,6 @@
 //go:build !windows
 
+//nolint:gosec // Tests exercise read-only state directories.
 package browser
 
 import (

@@ -1,5 +1,6 @@
 //go:build !windows
 
+//nolint:gosec,lll,unparam // Test doubles mirror the browser interface and HTTP harness.
 package supervisor_test
 
 import (
@@ -279,7 +280,7 @@ func callBrowserServer(
 	for name, value := range headers {
 		request.Header.Set(name, value)
 	}
-	response, err := httpServer.Client().Do(request)
+	response, err := httpServer.Client().Do(request) //nolint:bodyclose // decodeReply closes the body.
 	if err != nil {
 		t.Fatalf("post call: %v", err)
 	}

@@ -1,5 +1,6 @@
 //go:build !windows
 
+//nolint:gocyclo,lll // Table-driven client tests stay explicit.
 package supervisor_test
 
 import (

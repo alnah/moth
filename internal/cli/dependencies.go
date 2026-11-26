@@ -124,7 +124,6 @@ type defaultDependencyOptions struct {
 
 type defaultDependencySet struct {
 	Dependencies
-	browserPool      *browser.Pool
 	supervisorClient *supervisor.Client
 }
 
@@ -186,9 +185,6 @@ func (runtime *defaultDependencyRuntime) closeDependencies() error {
 	if runtime.set.supervisorClient != nil {
 		errs = append(errs, runtime.set.supervisorClient.Close())
 	}
-	if runtime.set.browserPool != nil {
-		errs = append(errs, runtime.set.browserPool.Close())
-	}
 	return errors.Join(errs...)
 }
 
@@ -198,11 +194,6 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 	credentials, environmentSettings, _ := config.LoadFromEnv(nil)
 	retryingHTTPClient := defaultRetryingHTTPClient(options.Limits)
 	browserBin := resolvedBrowserBin(options.BrowserBin, environmentSettings.RodBrowserBin)
-	browserPool := browser.NewPool(browser.ResolvePoolSize(0), browser.WithBrowserBin(browserBin))
-	browserService := browser.NewPersistentService(browser.PersistentServiceOptions{
-		BrowserBin: browserBin,
-		Stateless:  browserPool,
-	})
 	supervisorClient := supervisor.NewClient(supervisor.ClientOptions{
 		Version:     version,
 		BrowserBin:  browserBin,
@@ -240,9 +231,8 @@ func defaultDependencies(options defaultDependencyOptions) defaultDependencySet 
 				HTTPClient:  retryingHTTPClient,
 			}),
 			Tools:   toolsAdapter{},
-			Browser: browserService,
+			Browser: supervisorClient,
 		},
-		browserPool:      browserPool,
 		supervisorClient: supervisorClient,
 	}
 }

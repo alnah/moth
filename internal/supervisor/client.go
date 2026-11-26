@@ -283,6 +283,16 @@ func (client *Client) callWithParamsLocked(
 	params any,
 	result any,
 ) error {
+	return client.callWithParamsAndHeadersLocked(ctx, method, params, result, nil)
+}
+
+func (client *Client) callWithParamsAndHeadersLocked(
+	ctx context.Context,
+	method string,
+	params any,
+	result any,
+	headers map[string]string,
+) error {
 	if client.endpoint == nil {
 		return fmt.Errorf("%w: missing endpoint", ErrDaemonUnavailable)
 	}
@@ -313,6 +323,9 @@ func (client *Client) callWithParamsLocked(
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+client.endpoint.Token)
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
 
 	response, err := client.httpClient.Do(request) //nolint:gosec // Endpoint is a local daemon, not user-controlled SSRF.
 	if err != nil {
@@ -382,6 +395,10 @@ func callReplyError(callErr *CallError) error {
 		return fmt.Errorf("%w: %s", ErrDaemonProtocol, callErr.Message)
 	case CodeMethodFailed:
 		return fmt.Errorf("%w: %s", ErrDaemonMethod, callErr.Message)
+	case CodeBrowserStateUnavailable:
+		return fmt.Errorf("%w: %s", browser.ErrBrowserStateUnavailable, callErr.Message)
+	case CodeBrowserStateCorrupt:
+		return fmt.Errorf("%w: %s", browser.ErrBrowserStateCorrupt, callErr.Message)
 	default:
 		return fmt.Errorf("%w: %s", ErrDaemonUnavailable, callErr.Message)
 	}

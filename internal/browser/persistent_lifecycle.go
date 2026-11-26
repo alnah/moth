@@ -380,13 +380,7 @@ func (service *PersistentService) invalidateConnection(scope string) {
 }
 
 func disconnectConnection(ctx context.Context, connection BrowserConnection) error {
-	disconnecter, ok := connection.(interface {
-		Disconnect(context.Context) error
-	})
-	if !ok {
-		return nil
-	}
-	return disconnecter.Disconnect(ctx)
+	return connection.Disconnect(ctx)
 }
 
 func sortedPageIDs(pages map[string]*pageRecord) []string {

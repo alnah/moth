@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// DefaultStateDirs returns the default local and global browser state roots.
+func DefaultStateDirs() StateDirs {
+	return defaultStateDirs()
+}
+
 func defaultStateDirs() StateDirs {
 	local := filepath.Join(".moth", "browser")
 	home, err := os.UserHomeDir()

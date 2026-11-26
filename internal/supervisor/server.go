@@ -19,22 +19,35 @@ import (
 	"github.com/alnah/moth/internal/browser"
 )
 
-type methodHandler func(context.Context, json.RawMessage) (json.RawMessage, error)
+type methodHandler func(
+	context.Context,
+	requestMetadata,
+	json.RawMessage,
+) (json.RawMessage, error)
 
 // Server serves the daemon protocol.
 type Server struct {
-	version   string
-	token     string
-	startedAt time.Time
-	clock     func() time.Time
-	lifecycle browser.LifecycleOptions
-	logger    *slog.Logger
-	pool      *browser.Pool
-	handlers  map[string]methodHandler
+	version           string
+	token             string
+	startedAt         time.Time
+	clock             func() time.Time
+	lifecycle         browser.LifecycleOptions
+	logger            *slog.Logger
+	pool              *browser.Pool
+	browserBin        string
+	newBrowserService BrowserServiceFactory
+	handlers          map[string]methodHandler
+
+	browserMu sync.Mutex
+	browsers  map[browserServiceKey]*browser.PersistentService
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
 	activeCalls  atomic.Int64
+
+	closed    atomic.Bool
+	closeOnce sync.Once
+	closeErr  error
 
 	shutdownOnce sync.Once
 	shutdownCh   chan struct{}
@@ -54,27 +67,59 @@ func NewServer(options ServerOptions) *Server {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	factory := options.PersistentServiceFactory
+	if factory == nil {
+		factory = func(options browser.PersistentServiceOptions) *browser.PersistentService {
+			if options.TerminateProcess == nil {
+				options.TerminateProcess = browser.DefaultTerminateProcess
+			}
+			return browser.NewPersistentService(options)
+		}
+	}
 	server := &Server{
-		version:      options.Version,
-		token:        options.Token,
-		startedAt:    startedAt,
-		clock:        clock,
-		lifecycle:    options.Lifecycle,
-		logger:       logger,
-		pool:         options.Pool,
-		handlers:     make(map[string]methodHandler),
-		lastActivity: startedAt,
-		shutdownCh:   make(chan struct{}),
+		version:           options.Version,
+		token:             options.Token,
+		startedAt:         startedAt,
+		clock:             clock,
+		lifecycle:         options.Lifecycle,
+		logger:            logger,
+		pool:              options.Pool,
+		browserBin:        options.BrowserBin,
+		newBrowserService: factory,
+		browsers:          make(map[browserServiceKey]*browser.PersistentService),
+		handlers:          make(map[string]methodHandler),
+		lastActivity:      startedAt,
+		shutdownCh:        make(chan struct{}),
 	}
 	server.handlers[MethodHealth] = server.handleHealth
 	server.handlers[MethodShutdown] = server.handleShutdown
 	server.handlers[MethodFetchRendered] = server.handleFetchRendered
+	server.registerBrowserHandlers()
 	return server
 }
 
 // Reap runs one persistent browser lifecycle pass.
-func (server *Server) Reap(context.Context) (browser.ReapReport, error) {
-	return browser.ReapReport{}, nil
+func (server *Server) Reap(ctx context.Context) (browser.ReapReport, error) {
+	server.browserMu.Lock()
+	defer server.browserMu.Unlock()
+
+	report := browser.ReapReport{}
+	if server.closed.Load() {
+		return report, nil
+	}
+	var errs []error
+	now := server.clock()
+	for _, key := range sortedBrowserServiceKeys(server.browsers) {
+		service := server.browsers[key]
+		value, err := service.Reap(ctx, now)
+		report.ClosedPages += value.ClosedPages
+		report.ClosedSessions += value.ClosedSessions
+		report.ClosedBrowsers += value.ClosedBrowsers
+		if err != nil {
+			errs = append(errs, fmt.Errorf("reap browser %s/%s: %w", key.Local, key.Global, err))
+		}
+	}
+	return report, errors.Join(errs...)
 }
 
 // Idle reports whether the daemon can stop after the given inactivity.
@@ -106,10 +151,25 @@ func (server *Server) Shutdown(context.Context) error {
 
 // Close releases browser resources owned by the server.
 func (server *Server) Close() error {
-	if server.pool == nil {
-		return nil
-	}
-	return server.pool.Close()
+	server.closeOnce.Do(func() {
+		server.closed.Store(true)
+		server.browserMu.Lock()
+		ctx, cancel := context.WithTimeout(context.Background(), defaultServerTimeout)
+		defer cancel()
+		var errs []error
+		for _, key := range sortedBrowserServiceKeys(server.browsers) {
+			if err := server.browsers[key].Shutdown(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("close browser %s/%s: %w", key.Local, key.Global, err))
+			}
+		}
+		clear(server.browsers)
+		server.browserMu.Unlock()
+		if server.pool != nil {
+			errs = append(errs, server.pool.Close())
+		}
+		server.closeErr = errors.Join(errs...)
+	})
+	return server.closeErr
 }
 
 func (server *Server) done() <-chan struct{} {
@@ -167,7 +227,7 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	result, err := server.dispatch(request.Context(), call)
+	result, err := server.dispatch(request.Context(), requestMetadataFrom(request), call)
 	if err != nil {
 		code := CodeMethodFailed
 		switch {
@@ -175,6 +235,10 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 			code = CodeMethodNotFound
 		case errors.Is(err, errInvalidParams):
 			code = CodeProtocolError
+		case errors.Is(err, browser.ErrBrowserStateCorrupt):
+			code = CodeBrowserStateCorrupt
+		case errors.Is(err, browser.ErrBrowserStateUnavailable):
+			code = CodeBrowserStateUnavailable
 		}
 		writeReply(writer, http.StatusOK, Reply{
 			Error: &CallError{
@@ -200,25 +264,38 @@ func (server *Server) authorized(request *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(token), []byte(server.token)) == 1
 }
 
-func (server *Server) dispatch(ctx context.Context, call Call) (json.RawMessage, error) {
+func (server *Server) dispatch(
+	ctx context.Context,
+	metadata requestMetadata,
+	call Call,
+) (json.RawMessage, error) {
 	handler, ok := server.handlers[call.Method]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", errMethodNotFound, call.Method)
 	}
-	return handler(ctx, call.Params)
+	return handler(ctx, metadata, call.Params)
 }
 
-func (server *Server) handleHealth(context.Context, json.RawMessage) (json.RawMessage, error) {
+func (server *Server) handleHealth(
+	context.Context,
+	requestMetadata,
+	json.RawMessage,
+) (json.RawMessage, error) {
 	return marshalResult(server.health())
 }
 
-func (server *Server) handleShutdown(context.Context, json.RawMessage) (json.RawMessage, error) {
+func (server *Server) handleShutdown(
+	context.Context,
+	requestMetadata,
+	json.RawMessage,
+) (json.RawMessage, error) {
 	server.requestShutdown()
 	return marshalResult(server.health())
 }
 
 func (server *Server) handleFetchRendered(
 	ctx context.Context,
+	_ requestMetadata,
 	raw json.RawMessage,
 ) (json.RawMessage, error) {
 	var params FetchRenderedParams
@@ -266,7 +343,13 @@ func (server *Server) endCall() {
 }
 
 func (server *Server) activeBrowsers() int {
-	return 0
+	server.browserMu.Lock()
+	defer server.browserMu.Unlock()
+	active := 0
+	for _, service := range server.browsers {
+		active += service.ActiveBrowsers()
+	}
+	return active
 }
 
 func marshalResult(value any) (json.RawMessage, error) {
