@@ -56,7 +56,9 @@ func newDaemonRunCommand(rootOptions *rootFlags, daemonOptions *daemonFlags) *co
 			if len(args) != 0 {
 				return newInvalidArgumentsError(errors.New("daemon run accepts no positional arguments"))
 			}
-			return runDaemon(cmd.Context(), supervisor.RunOptions{
+			ctx, stop := daemonSignalContext(cmd.Context())
+			defer stop()
+			return runDaemon(ctx, supervisor.RunOptions{
 				RuntimeDir: daemonOptions.runtimeDir(),
 				Version:    version,
 				BrowserBin: daemonBrowserBin(browserBin, rootOptions),
