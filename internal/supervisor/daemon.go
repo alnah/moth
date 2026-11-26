@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -273,23 +272,4 @@ func DefaultRuntimeDir() string {
 
 func defaultRuntimeDir() string {
 	return filepath.Join(defaultMothDir(), "run")
-}
-
-func openDaemonLogger(options RunOptions) (*LogFile, *slog.Logger, error) {
-	if options.Logger != nil {
-		return nil, options.Logger, nil
-	}
-	logPath := strings.TrimSpace(options.LogPath)
-	if logPath == "" {
-		return nil, nil, nil
-	}
-	logFile, err := OpenLogFile(logPath, options.LogMaxBytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open daemon log: %w", err)
-	}
-	logger := logFile.Logger().With(
-		"pid", os.Getpid(),
-		"version", options.Version,
-	)
-	return logFile, logger, nil
 }
