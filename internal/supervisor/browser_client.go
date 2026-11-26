@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alnah/moth/internal/browser"
+	"github.com/alnah/moth/internal/content"
 )
 
 // Start launches or reuses a persistent browser.
@@ -399,5 +400,20 @@ func (value BrowserPageResult) browserPage() browser.PageInfo {
 		Active:      value.Active,
 		ProfileName: value.ProfileName,
 		SessionName: value.SessionName,
+	}
+}
+
+func newBrowserChallengeResultFromWarnings(
+	value BrowserChallengeResult,
+) browser.ManualChallengeResult {
+	warnings := make([]content.Warning, 0, len(value.Warnings))
+	for _, warning := range value.Warnings {
+		warnings = append(warnings, content.Warning(warning))
+	}
+	return browser.ManualChallengeResult{
+		ManualRequired: value.ManualRequired,
+		Kind:           value.Kind,
+		Solved:         value.Solved,
+		Warnings:       warnings,
 	}
 }
