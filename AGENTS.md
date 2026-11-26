@@ -11,8 +11,8 @@
 - Explore: always audit codebase, documentation, and stack before jumping into a task; respect language or tech idioms.
 - Codebase: codebase's root.
 - Documentation: `README.md`, `docs/`.
-- Stack: `~/workspace/stack/` contains local source-of-truth clones named `owner.repo`; use `~/workspace/stack/maps/<TECH>.md` as navigation map when available.
-- Go: always start with `~/workspace/stack/maps/GO.md` to choose task-relevant local sources; prefer lookup in stack and maps to orientate yourself.
+- Stack: `~/workspace/repos/` contains local source-of-truth clones named `owner.repo`; use `~/workspace/repos/maps/<TECH>.md` as navigation map when available.
+- Go: always start with `~/workspace/repos/maps/GO.md` to choose task-relevant local sources; prefer lookup in stack and maps to orientate yourself.
 - Go stack roles:
   - `golang.go` = spec, memory model, stdlib, toolchain, API diffs;
   - `golang.website` = go.dev docs, blog, tutorials, release notes;
