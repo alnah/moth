@@ -39,7 +39,7 @@ func newRodPersistentChromeLauncher(ctx context.Context, request LaunchRequest, 
 	browserLauncher := launcher.New().
 		Context(ctx).
 		Headless(!request.Show).
-		Leakless(false).
+		Leakless(true).
 		UserDataDir(request.DataDir)
 	if browserBin != "" {
 		browserLauncher = browserLauncher.Bin(browserBin)
