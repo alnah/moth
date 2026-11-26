@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,7 +16,7 @@ import (
 )
 
 func TestClientHealthStartsDaemonOnDemand(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	var starts atomic.Int32
 	var mu sync.Mutex
 	var daemons []*inProcessDaemon
@@ -27,9 +26,9 @@ func TestClientHealthStartsDaemonOnDemand(t *testing.T) {
 		Version:    testVersion,
 		CommandFunc: func(_ context.Context, spec supervisor.DaemonSpec) error {
 			starts.Add(1)
-			daemon, err := launchDaemon(spec.RuntimeDir, spec.Version)
-			if err != nil {
-				return err
+			daemon, launchErr := launchDaemon(spec.RuntimeDir, spec.Version)
+			if launchErr != nil {
+				return launchErr
 			}
 			mu.Lock()
 			daemons = append(daemons, daemon)
@@ -66,7 +65,7 @@ func TestClientHealthStartsDaemonOnDemand(t *testing.T) {
 }
 
 func TestClientReusesRunningDaemonWithoutStartingAnother(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 
 	var starts atomic.Int32
@@ -89,7 +88,7 @@ func TestClientReusesRunningDaemonWithoutStartingAnother(t *testing.T) {
 }
 
 func TestClientHealthReturnsUnavailableWhenStartFails(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	var starts atomic.Int32
 	client := supervisor.NewClient(supervisor.ClientOptions{
 		RuntimeDir: runtimeDir,
@@ -111,7 +110,7 @@ func TestClientHealthReturnsUnavailableWhenStartFails(t *testing.T) {
 }
 
 func TestClientHealthHonorsCanceledContext(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	var starts atomic.Int32
 	client := supervisor.NewClient(supervisor.ClientOptions{
 		RuntimeDir: runtimeDir,
@@ -136,7 +135,7 @@ func TestClientHealthHonorsCanceledContext(t *testing.T) {
 }
 
 func TestClientHealthRejectsVersionMismatch(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, "daemon-version")
 
 	var starts atomic.Int32
@@ -160,7 +159,7 @@ func TestClientHealthRejectsVersionMismatch(t *testing.T) {
 }
 
 func TestClientHealthReportsUnauthorizedToken(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 
 	runtime := readRuntime(t, runtimeDir)
@@ -169,8 +168,8 @@ func TestClientHealthReportsUnauthorizedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal unauthorized runtime: %v", err)
 	}
-	if err := os.WriteFile(supervisor.RuntimePath(runtimeDir), data, 0o600); err != nil {
-		t.Fatalf("write unauthorized runtime: %v", err)
+	if writeErr := os.WriteFile(supervisor.RuntimePath(runtimeDir), data, 0o600); writeErr != nil {
+		t.Fatalf("write unauthorized runtime: %v", writeErr)
 	}
 
 	var starts atomic.Int32
@@ -194,7 +193,7 @@ func TestClientHealthReportsUnauthorizedToken(t *testing.T) {
 }
 
 func TestClientHealthReplacesCorruptRuntime(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create runtime dir: %v", err)
 	}
@@ -210,9 +209,9 @@ func TestClientHealthReplacesCorruptRuntime(t *testing.T) {
 		Version:    testVersion,
 		CommandFunc: func(_ context.Context, spec supervisor.DaemonSpec) error {
 			starts.Add(1)
-			daemon, err := launchDaemon(spec.RuntimeDir, spec.Version)
-			if err != nil {
-				return err
+			daemon, launchErr := launchDaemon(spec.RuntimeDir, spec.Version)
+			if launchErr != nil {
+				return launchErr
 			}
 			mu.Lock()
 			daemons = append(daemons, daemon)
@@ -234,7 +233,7 @@ func TestClientHealthReplacesCorruptRuntime(t *testing.T) {
 }
 
 func TestClientHealthReplacesStaleRuntime(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create runtime dir: %v", err)
 	}
@@ -250,8 +249,8 @@ func TestClientHealthReplacesStaleRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal stale runtime: %v", err)
 	}
-	if err := os.WriteFile(supervisor.RuntimePath(runtimeDir), data, 0o600); err != nil {
-		t.Fatalf("write stale runtime: %v", err)
+	if writeErr := os.WriteFile(supervisor.RuntimePath(runtimeDir), data, 0o600); writeErr != nil {
+		t.Fatalf("write stale runtime: %v", writeErr)
 	}
 
 	var starts atomic.Int32
@@ -262,9 +261,9 @@ func TestClientHealthReplacesStaleRuntime(t *testing.T) {
 		Version:    testVersion,
 		CommandFunc: func(_ context.Context, spec supervisor.DaemonSpec) error {
 			starts.Add(1)
-			daemon, err := launchDaemon(spec.RuntimeDir, spec.Version)
-			if err != nil {
-				return err
+			daemon, launchErr := launchDaemon(spec.RuntimeDir, spec.Version)
+			if launchErr != nil {
+				return launchErr
 			}
 			mu.Lock()
 			daemons = append(daemons, daemon)
@@ -294,7 +293,7 @@ func TestClientHealthReplacesStaleRuntime(t *testing.T) {
 }
 
 func TestClientConcurrentHealthStartsOneDaemon(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	var starts atomic.Int32
 	var mu sync.Mutex
 	var daemons []*inProcessDaemon
@@ -304,9 +303,9 @@ func TestClientConcurrentHealthStartsOneDaemon(t *testing.T) {
 		Version:    testVersion,
 		CommandFunc: func(_ context.Context, spec supervisor.DaemonSpec) error {
 			starts.Add(1)
-			daemon, err := launchDaemon(spec.RuntimeDir, spec.Version)
-			if err != nil {
-				return err
+			daemon, launchErr := launchDaemon(spec.RuntimeDir, spec.Version)
+			if launchErr != nil {
+				return launchErr
 			}
 			mu.Lock()
 			daemons = append(daemons, daemon)
@@ -323,12 +322,10 @@ func TestClientConcurrentHealthStartsOneDaemon(t *testing.T) {
 	var waitGroup sync.WaitGroup
 	errs := make(chan error, callers)
 	for range callers {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
+		waitGroup.Go(func() {
 			_, err := client.Health(context.Background())
 			errs <- err
-		}()
+		})
 	}
 	waitGroup.Wait()
 	close(errs)
@@ -344,7 +341,7 @@ func TestClientConcurrentHealthStartsOneDaemon(t *testing.T) {
 }
 
 func TestClientShutdownIsIdempotentAndRemovesRuntime(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 
 	client := supervisor.NewClient(supervisor.ClientOptions{

@@ -14,7 +14,7 @@ import (
 )
 
 func TestRunStopsOnContextCancelAndRemovesRuntime(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	daemon := startDaemonAt(t, runtimeDir, testVersion)
 
 	if _, err := os.Stat(supervisor.RuntimePath(runtimeDir)); err != nil {
@@ -33,7 +33,7 @@ func TestRunStopsOnContextCancelAndRemovesRuntime(t *testing.T) {
 }
 
 func TestRunRejectsSecondInstance(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -48,7 +48,7 @@ func TestRunRejectsSecondInstance(t *testing.T) {
 }
 
 func TestRunReplacesStaleSocket(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create runtime dir: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRunFailsWhenRuntimeDirIsFile(t *testing.T) {
 }
 
 func TestRunWithCanceledContextDoesNotLeaveRuntime(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

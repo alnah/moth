@@ -23,7 +23,7 @@ func TestRuntimePathsAreStable(t *testing.T) {
 }
 
 func TestRunWritesPrivateRuntimeState(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 
 	runtime := readRuntime(t, runtimeDir)

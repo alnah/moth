@@ -90,6 +90,17 @@ func (daemon *inProcessDaemon) stop() error {
 	return daemon.stopErr
 }
 
+func newRuntimeDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "moth-run-")
+	if err != nil {
+		t.Fatalf("create runtime dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func waitForRuntimeFile(runtimeDir string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -133,7 +144,8 @@ func postCall(
 ) *http.Response {
 	t.Helper()
 
-	request, err := http.NewRequest(
+	request, err := http.NewRequestWithContext(
+		context.Background(),
 		http.MethodPost,
 		"http://moth"+supervisor.CallPath,
 		strings.NewReader(body),
@@ -146,7 +158,7 @@ func postCall(
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	response, err := client.Do(request)
+	response, err := client.Do(request) //nolint:gosec // Test client dials a local Unix socket.
 	if err != nil {
 		t.Fatalf("post call: %v", err)
 	}

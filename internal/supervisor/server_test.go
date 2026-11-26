@@ -5,7 +5,6 @@ package supervisor_test
 import (
 	"context"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 )
 
 func TestServerHealthWithValidToken(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 	runtime := readRuntime(t, runtimeDir)
 
@@ -42,7 +41,7 @@ func TestServerHealthWithValidToken(t *testing.T) {
 }
 
 func TestServerRejectsMissingOrWrongToken(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 	runtime := readRuntime(t, runtimeDir)
 	client := unixHTTPClient(t, runtime.Address)
@@ -59,7 +58,7 @@ func TestServerRejectsMissingOrWrongToken(t *testing.T) {
 }
 
 func TestServerRejectsMalformedRequest(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 	runtime := readRuntime(t, runtimeDir)
 	client := unixHTTPClient(t, runtime.Address)
@@ -76,7 +75,7 @@ func TestServerRejectsMalformedRequest(t *testing.T) {
 }
 
 func TestServerRejectsUnknownMethod(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 	runtime := readRuntime(t, runtimeDir)
 	client := unixHTTPClient(t, runtime.Address)
@@ -98,7 +97,7 @@ func TestServerRejectsUnknownMethod(t *testing.T) {
 }
 
 func TestServerRejectsOversizedRequest(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 	runtime := readRuntime(t, runtimeDir)
 	client := unixHTTPClient(t, runtime.Address)
@@ -116,7 +115,7 @@ func TestServerRejectsOversizedRequest(t *testing.T) {
 }
 
 func TestServerHealthRequiresPost(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "run")
+	runtimeDir := newRuntimeDir(t)
 	_ = startDaemonAt(t, runtimeDir, testVersion)
 	runtime := readRuntime(t, runtimeDir)
 	client := unixHTTPClient(t, runtime.Address)
@@ -132,7 +131,7 @@ func TestServerHealthRequiresPost(t *testing.T) {
 	}
 	request.Header.Set("Authorization", "Bearer "+runtime.Token)
 
-	response, err := client.Do(request)
+	response, err := client.Do(request) //nolint:gosec // Test client dials a local Unix socket.
 	if err != nil {
 		t.Fatalf("GET health: %v", err)
 	}
