@@ -167,3 +167,34 @@ func decodeDaemonStatus(t *testing.T, payload string) daemonStatusDocumentTest {
 	}
 	return document
 }
+
+func TestDaemonRunPassesDefaultLogPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	previousRunDaemon := runDaemon
+	t.Cleanup(func() { runDaemon = previousRunDaemon })
+
+	var got supervisor.RunOptions
+	runDaemon = func(_ context.Context, options supervisor.RunOptions) error {
+		got = options
+		return nil
+	}
+
+	stdout, stderr, err := executeRootCommand("daemon", "run")
+	if err != nil {
+		t.Fatalf("execute daemon run: %v\nstderr: %s", err, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+
+	want := supervisor.DefaultLogPath()
+	if got.LogPath != want {
+		t.Fatalf("RunOptions.LogPath = %q, want %q", got.LogPath, want)
+	}
+	if _, statErr := os.Stat(want); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("CLI created log file, stat error = %v", statErr)
+	}
+}

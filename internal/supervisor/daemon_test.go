@@ -3,10 +3,14 @@
 package supervisor_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,4 +108,99 @@ func TestRunWithCanceledContextDoesNotLeaveRuntime(t *testing.T) {
 	if _, statErr := os.Stat(supervisor.RuntimePath(runtimeDir)); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("runtime file after canceled start err = %v, want absent", statErr)
 	}
+}
+
+func TestDaemonWritesStartAndStopLogs(t *testing.T) {
+	runtimeDir := newRuntimeDir(t)
+	logPath := filepath.Join(t.TempDir(), "log", "daemon.log")
+	daemon := startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
+		LogPath: logPath,
+	})
+	runtime := readRuntime(t, runtimeDir)
+
+	if err := daemon.stop(); err != nil {
+		t.Fatalf("stop daemon: %v", err)
+	}
+
+	messages := daemonLogMessages(t, logPath)
+	for _, want := range []string{"daemon started", "daemon stopping", "daemon stopped"} {
+		if !messages[want] {
+			t.Fatalf("log messages = %v, want %q", messages, want)
+		}
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read daemon log: %v", err)
+	}
+	if strings.Contains(string(data), runtime.Token) {
+		t.Fatal("daemon log contains the runtime token")
+	}
+}
+
+func TestDaemonFailsWhenLogPathUnwritable(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write log blocker: %v", err)
+	}
+
+	runtimeDir := newRuntimeDir(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := supervisor.Run(ctx, supervisor.RunOptions{
+		RuntimeDir: runtimeDir,
+		Version:    testVersion,
+		LogPath:    filepath.Join(blocker, "daemon.log"),
+	})
+	if err == nil {
+		t.Fatal("Run(unwritable log path) error = nil, want error")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run(unwritable log path) hung until context deadline: %v", err)
+	}
+	if _, statErr := os.Stat(supervisor.RuntimePath(runtimeDir)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("runtime file after log failure err = %v, want absent", statErr)
+	}
+}
+
+func TestDaemonCustomLoggerWinsOverLogPath(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	runtimeDir := newRuntimeDir(t)
+	logPath := filepath.Join(t.TempDir(), "log", "daemon.log")
+	daemon := startDaemonWithOptions(t, runtimeDir, testVersion, supervisor.RunOptions{
+		Logger:  logger,
+		LogPath: logPath,
+	})
+
+	if err := daemon.stop(); err != nil {
+		t.Fatalf("stop daemon: %v", err)
+	}
+
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("custom logger created log file, stat error = %v", err)
+	}
+	if !strings.Contains(logs.String(), "daemon started") {
+		t.Fatalf("custom logger missing start event: %s", logs.String())
+	}
+}
+
+func daemonLogMessages(t *testing.T, path string) map[string]bool {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read daemon log: %v", err)
+	}
+	messages := make(map[string]bool)
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var record struct {
+			Message string `json:"msg"`
+		}
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("decode daemon log line: %v\n%s", err, line)
+		}
+		messages[record.Message] = true
+	}
+	return messages
 }

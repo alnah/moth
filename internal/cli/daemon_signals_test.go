@@ -63,6 +63,8 @@ func runDaemonSignalHelper(t *testing.T) {
 func runDaemonSignalChild(t *testing.T, signal os.Signal) {
 	t.Helper()
 
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	runtimeDir := newShortRuntimeDir(t)
 	child := startDaemonSignalChild(t, runtimeDir)
 

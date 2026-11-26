@@ -109,6 +109,15 @@ func TestDefaultRuntimeDir(t *testing.T) {
 	}
 }
 
+func TestDefaultLogPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".moth", "log", "daemon.log")
+	if got := DefaultLogPath(); got != want {
+		t.Fatalf("DefaultLogPath() = %q, want %q", got, want)
+	}
+}
+
 func TestServerShutdownRequestsStop(t *testing.T) {
 	server := NewServer(ServerOptions{Version: "v1", Token: "token"})
 	if err := server.Shutdown(context.Background()); err != nil {
