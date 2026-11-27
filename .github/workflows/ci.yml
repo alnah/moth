@@ -157,3 +157,39 @@ jobs:
           flags: browser
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  windows-test:
+    runs-on: windows-latest
+    env:
+      MOTH_BROWSER_REQUIRED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Resolve Chrome
+        shell: pwsh
+        run: |
+          $chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+          if (!(Test-Path $chrome)) {
+            throw "Chrome not found: $chrome"
+          }
+          "ROD_BROWSER_BIN=$chrome" >> $env:GITHUB_ENV
+
+      - name: Browser tests
+        run: go test -p 1 -tags browser -count=1 ./internal/browser
