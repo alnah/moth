@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -455,11 +456,8 @@ func (browser *lifecycleBrowser) ListPages(
 	}
 	pages := make([]PageInfo, 0, len(ids))
 	for _, page := range browser.pages {
-		for _, id := range ids {
-			if page.ID == id {
-				pages = append(pages, page)
-				break
-			}
+		if slices.Contains(ids, page.ID) {
+			pages = append(pages, page)
 		}
 	}
 	return pages, nil

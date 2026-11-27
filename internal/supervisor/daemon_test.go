@@ -193,7 +193,7 @@ func daemonLogMessages(t *testing.T, path string) map[string]bool {
 		t.Fatalf("read daemon log: %v", err)
 	}
 	messages := make(map[string]bool)
-	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+	for line := range bytes.SplitSeq(bytes.TrimSpace(data), []byte("\n")) {
 		var record struct {
 			Message string `json:"msg"`
 		}
