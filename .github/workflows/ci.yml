@@ -174,10 +174,13 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test ./...
+        run: go test -p 1 ./...
 
       - name: Vet
         run: go vet ./...
+
+      - name: Vet browser tests
+        run: go vet -tags browser ./internal/cli
 
       - name: Build
         run: go build ./...
@@ -192,4 +195,4 @@ jobs:
           "ROD_BROWSER_BIN=$chrome" >> $env:GITHUB_ENV
 
       - name: Browser tests
-        run: go test -p 1 -tags browser -count=1 ./internal/browser
+        run: go test -p 1 -tags browser -count=1 ./internal/browser ./internal/cli

@@ -1,16 +1,12 @@
-//go:build browser && !windows
+//go:build browser
 
 package cli
 
 import (
-	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/alnah/moth/internal/supervisor"
 )
@@ -29,53 +25,6 @@ type processTree struct {
 	Chrome processEntry
 }
 
-func readProcessTable(t *testing.T) map[int]processEntry {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	output, err := exec.CommandContext(ctx, "ps", "-axww", "-o", "pid=,ppid=,pgid=,stat=,command=").Output()
-	if err != nil {
-		t.Fatalf("read process table: %v", err)
-	}
-
-	table := make(map[int]processEntry)
-	for line := range strings.SplitSeq(string(output), "\n") {
-		entry, ok := parseProcessLine(line)
-		if ok {
-			table[entry.PID] = entry
-		}
-	}
-	return table
-}
-
-func parseProcessLine(line string) (processEntry, bool) {
-	fields := strings.Fields(line)
-	if len(fields) < 4 {
-		return processEntry{}, false
-	}
-	pid, err := strconv.Atoi(fields[0])
-	if err != nil {
-		return processEntry{}, false
-	}
-	ppid, err := strconv.Atoi(fields[1])
-	if err != nil {
-		return processEntry{}, false
-	}
-	pgid, err := strconv.Atoi(fields[2])
-	if err != nil {
-		return processEntry{}, false
-	}
-	return processEntry{
-		PID:     pid,
-		PPID:    ppid,
-		PGID:    pgid,
-		Stat:    fields[3],
-		Command: strings.Join(fields[4:], " "),
-	}, true
-}
-
 func processEntryFor(t *testing.T, table map[int]processEntry, pid int) processEntry {
 	t.Helper()
 
@@ -84,10 +33,6 @@ func processEntryFor(t *testing.T, table map[int]processEntry, pid int) processE
 		t.Fatalf("process %d not found", pid)
 	}
 	return entry
-}
-
-func processRunning(entry processEntry) bool {
-	return entry.PID > 0 && !strings.HasPrefix(entry.Stat, "Z")
 }
 
 func waitProcessGone(t *testing.T, pid int) {
@@ -121,19 +66,17 @@ func (env *browserIntegrationEnv) assertOwnedTree(
 	chrome := processEntryFor(t, table, state.ChromePID)
 	guard := processEntryFor(t, table, chrome.PPID)
 
-	if chrome.PGID != chrome.PID {
-		t.Fatalf("chrome pgid = %d, want pid %d", chrome.PGID, chrome.PID)
-	}
+	assertProcessGroup(t, chrome)
 	if chrome.PPID != guard.PID {
 		t.Fatalf("chrome ppid = %d, want guard %d", chrome.PPID, guard.PID)
 	}
 	if guard.PPID != daemon.PID {
 		t.Fatalf("guard ppid = %d, want daemon %d", guard.PPID, daemon.PID)
 	}
-	if !strings.Contains(guard.Command, "leakless") {
+	if !strings.Contains(strings.ToLower(guard.Command), "leakless") {
 		t.Fatalf("guard command = %q, want leakless", guard.Command)
 	}
-	if !strings.Contains(chrome.Command, state.DataDir) {
+	if !commandContainsPath(chrome.Command, state.DataDir) {
 		t.Fatalf("chrome command = %q, want data dir %q", chrome.Command, state.DataDir)
 	}
 	return processTree{Daemon: daemon, Guard: guard, Chrome: chrome}
@@ -147,22 +90,21 @@ func (env *browserIntegrationEnv) waitPoolTree(t *testing.T, daemonPID int) proc
 		table := readProcessTable(t)
 		daemon := processEntryFor(t, table, daemonPID)
 		for _, guard := range table {
-			if guard.PPID != daemonPID || !strings.Contains(guard.Command, "leakless") {
+			if guard.PPID != daemonPID || !strings.Contains(strings.ToLower(guard.Command), "leakless") {
 				continue
 			}
 			for _, chrome := range table {
 				if chrome.PPID != guard.PID {
 					continue
 				}
-				if !strings.Contains(chrome.Command, env.Tmp) ||
-					!strings.Contains(chrome.Command, "/rod/user-data") {
+				if !commandContainsPath(chrome.Command, env.poolProfile()) {
 					continue
 				}
 				tree = processTree{Daemon: daemon, Guard: guard, Chrome: chrome}
 				return nil
 			}
 		}
-		return fmt.Errorf("pool Chrome not found under daemon %d", daemonPID)
+		return fmt.Errorf("pool Chrome not found under daemon %d: %s", daemonPID, processSummary(table))
 	})
 	return tree
 }
@@ -171,13 +113,34 @@ func (env *browserIntegrationEnv) assertNoTestChrome(t *testing.T) {
 	t.Helper()
 
 	persistentProfile := filepath.Join(env.Work, ".moth", "browser", "chrome-data")
-	poolProfile := filepath.Join(env.Tmp, "rod", "user-data")
+	poolProfile := env.poolProfile()
 	for _, entry := range readProcessTable(t) {
 		if !processRunning(entry) {
 			continue
 		}
-		if strings.Contains(entry.Command, persistentProfile) || strings.Contains(entry.Command, poolProfile) {
+		if commandContainsPath(entry.Command, persistentProfile) || commandContainsPath(entry.Command, poolProfile) {
 			t.Fatalf("test Chrome still alive: pid=%d command=%s", entry.PID, entry.Command)
 		}
 	}
+}
+
+func commandContainsPath(command string, path string) bool {
+	command = strings.ToLower(filepath.ToSlash(command))
+	path = strings.ToLower(filepath.ToSlash(path))
+	return strings.Contains(command, path)
+}
+
+func processSummary(table map[int]processEntry) string {
+	var summary strings.Builder
+	for _, entry := range table {
+		command := strings.ToLower(entry.Command)
+		if !strings.Contains(command, "chrome") && !strings.Contains(command, "leakless") {
+			continue
+		}
+		if summary.Len() > 0 {
+			summary.WriteString("; ")
+		}
+		fmt.Fprintf(&summary, "pid=%d ppid=%d command=%s", entry.PID, entry.PPID, entry.Command)
+	}
+	return summary.String()
 }

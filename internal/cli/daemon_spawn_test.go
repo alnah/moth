@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/alnah/moth/internal/supervisor"
@@ -56,15 +57,26 @@ func TestDaemonEnvironmentFiltersSecrets(t *testing.T) {
 		"PATH=/usr/bin",
 		"HOME=/Users/alnah",
 		"USERPROFILE=/Users/alnah",
+		"SystemRoot=C:\\Windows",
+		"ProgramFiles=C:\\Program Files",
 		"DISPLAY=:0",
 		"ROD_NO_SANDBOX=1",
 		"BRAVE_API_KEY=secret",
 		"OPENAI_API_KEY=secret",
 		"X_BEARER_TOKEN=secret",
 		"PODCAST_INDEX_API_SECRET=secret",
+		"GITHUB_TOKEN=secret",
 	})
 
-	allowed := []string{"PATH=/usr/bin", "HOME=/Users/alnah", "USERPROFILE=/Users/alnah", "DISPLAY=:0", "ROD_NO_SANDBOX=1"}
+	allowed := []string{
+		"PATH=/usr/bin",
+		"HOME=/Users/alnah",
+		"USERPROFILE=/Users/alnah",
+		"SystemRoot=C:\\Windows",
+		"ProgramFiles=C:\\Program Files",
+		"DISPLAY=:0",
+		"ROD_NO_SANDBOX=1",
+	}
 	for _, value := range allowed {
 		if !containsEnv(got, value) {
 			t.Fatalf("environment = %#v, want %q", got, value)
@@ -75,6 +87,7 @@ func TestDaemonEnvironmentFiltersSecrets(t *testing.T) {
 		"OPENAI_API_KEY=secret",
 		"X_BEARER_TOKEN=secret",
 		"PODCAST_INDEX_API_SECRET=secret",
+		"GITHUB_TOKEN=secret",
 	} {
 		if containsEnv(got, value) {
 			t.Fatalf("environment = %#v, must not contain %q", got, value)
@@ -83,10 +96,5 @@ func TestDaemonEnvironmentFiltersSecrets(t *testing.T) {
 }
 
 func containsEnv(environment []string, want string) bool {
-	for _, value := range environment {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(environment, want)
 }

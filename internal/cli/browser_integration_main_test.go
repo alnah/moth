@@ -1,4 +1,4 @@
-//go:build browser && !windows
+//go:build browser
 
 package cli
 

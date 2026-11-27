@@ -47,23 +47,46 @@ func daemonCommand(ctx context.Context, spec supervisor.DaemonSpec) (*exec.Cmd, 
 }
 
 var daemonEnvironmentAllowlist = map[string]struct{}{
-	"PATH":            {},
-	"HOME":            {},
-	"USERPROFILE":     {},
-	"USER":            {},
-	"LOGNAME":         {},
-	"SHELL":           {},
-	"TMPDIR":          {},
-	"TMP":             {},
-	"TEMP":            {},
-	"LANG":            {},
-	"LC_ALL":          {},
-	"LC_CTYPE":        {},
-	"DISPLAY":         {},
-	"WAYLAND_DISPLAY": {},
-	"XDG_RUNTIME_DIR": {},
-	"ROD_NO_SANDBOX":  {},
-	"ROD_BROWSER_BIN": {},
+	"PATH":                    {},
+	"HOME":                    {},
+	"USERPROFILE":             {},
+	"USER":                    {},
+	"LOGNAME":                 {},
+	"SHELL":                   {},
+	"TMPDIR":                  {},
+	"TMP":                     {},
+	"TEMP":                    {},
+	"SYSTEMDRIVE":             {},
+	"SYSTEMROOT":              {},
+	"WINDIR":                  {},
+	"COMSPEC":                 {},
+	"PATHEXT":                 {},
+	"HOMEDRIVE":               {},
+	"HOMEPATH":                {},
+	"USERNAME":                {},
+	"USERDOMAIN":              {},
+	"COMPUTERNAME":            {},
+	"PROCESSOR_ARCHITECTURE":  {},
+	"NUMBER_OF_PROCESSORS":    {},
+	"OS":                      {},
+	"PROGRAMDATA":             {},
+	"ALLUSERSPROFILE":         {},
+	"PROGRAMFILES":            {},
+	"PROGRAMFILES(X86)":       {},
+	"COMMONPROGRAMFILES":      {},
+	"COMMONPROGRAMFILES(X86)": {},
+	"COMMONPROGRAMW6432":      {},
+	"PROGRAMW6432":            {},
+	"LOCALAPPDATA":            {},
+	"APPDATA":                 {},
+	"LANG":                    {},
+	"LC_ALL":                  {},
+	"LC_CTYPE":                {},
+	"DISPLAY":                 {},
+	"WAYLAND_DISPLAY":         {},
+	"XDG_RUNTIME_DIR":         {},
+	"ROD_NO_SANDBOX":          {},
+	"ROD_BROWSER_BIN":         {},
 }
 
 func daemonEnvironment(environment []string) []string {
@@ -73,7 +96,7 @@ func daemonEnvironment(environment []string) []string {
 		if !ok {
 			continue
 		}
-		if _, keep := daemonEnvironmentAllowlist[name]; keep {
+		if _, keep := daemonEnvironmentAllowlist[strings.ToUpper(name)]; keep {
 			filtered = append(filtered, entry)
 		}
 	}

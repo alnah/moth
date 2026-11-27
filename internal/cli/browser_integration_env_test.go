@@ -1,4 +1,4 @@
-//go:build browser && !windows
+//go:build browser
 
 package cli
 
@@ -13,9 +13,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/ysmood/leakless"
 
 	"github.com/alnah/moth/internal/supervisor"
 	"github.com/alnah/moth/internal/tools"
@@ -25,9 +26,10 @@ const (
 	browserRequiredEnv       = "MOTH_BROWSER_REQUIRED"
 	browserIntegrationWait   = 30 * time.Second
 	browserIntegrationStop   = 10 * time.Second
-	browserIntegrationPoll   = 50 * time.Millisecond
 	browserIntegrationOutput = 45 * time.Second
 )
+
+var browserIntegrationPoll = 50 * time.Millisecond
 
 type browserIntegrationEnv struct {
 	Home       string
@@ -87,11 +89,19 @@ type daemonStatusEnvelope struct {
 func newBrowserIntegrationEnv(t *testing.T) *browserIntegrationEnv {
 	t.Helper()
 
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("real browser integration requires leakless support on %s", runtime.GOOS)
+	if !leakless.Support() {
+		t.Skipf("real browser integration requires leakless support on %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	home := mustMkdirTemp(t)
+	if runtime.GOOS == "windows" {
+		// Chrome resolves its profile from USERPROFILE on Windows.
+		for _, dir := range []string{"Local", "Roaming"} {
+			if err := os.MkdirAll(filepath.Join(home, "AppData", dir), 0o750); err != nil {
+				t.Fatalf("create test profile AppData: %v", err)
+			}
+		}
+	}
 	work := mustMkdirTemp(t)
 	tmp := mustMkdirTemp(t)
 	t.Cleanup(func() {
@@ -128,27 +138,12 @@ func mustMkdirTemp(t *testing.T) string {
 }
 
 func (env *browserIntegrationEnv) environment() []string {
-	names := []string{
-		"PATH",
-		"USER",
-		"LOGNAME",
-		"SHELL",
-		"LANG",
-		"LC_ALL",
-		"LC_CTYPE",
-		"DISPLAY",
-		"WAYLAND_DISPLAY",
-		"XDG_RUNTIME_DIR",
-		"ROD_NO_SANDBOX",
-	}
-	environment := make([]string, 0, len(names)+2)
-	for _, name := range names {
-		if value, ok := os.LookupEnv(name); ok {
-			environment = append(environment, name+"="+value)
-		}
-	}
+	environment := daemonEnvironment(os.Environ())
 	environment = setEnv(environment, "HOME", env.Home)
+	environment = setEnv(environment, "USERPROFILE", env.Home)
 	environment = setEnv(environment, "TMPDIR", env.Tmp)
+	environment = setEnv(environment, "TMP", env.Tmp)
+	environment = setEnv(environment, "TEMP", env.Tmp)
 	return environment
 }
 
@@ -301,7 +296,7 @@ func (env *browserIntegrationEnv) cleanupProcesses(t *testing.T) {
 	if runtimeErr == nil {
 		env.stopDaemon(t)
 		if processAlive(runtimeState.PID) {
-			_ = syscall.Kill(runtimeState.PID, syscall.SIGTERM)
+			_ = terminateDaemon(runtimeState.PID)
 		}
 	}
 
@@ -317,7 +312,11 @@ func (env *browserIntegrationEnv) cleanupProcesses(t *testing.T) {
 	if !ok || !strings.Contains(chrome.Command, state.DataDir) {
 		return
 	}
-	_ = syscall.Kill(-state.ChromePID, syscall.SIGKILL)
+	_ = terminateChrome(state.ChromePID)
+}
+
+func (env *browserIntegrationEnv) poolProfile() string {
+	return filepath.Join(env.Tmp, "rod", "user-data")
 }
 
 func (env *browserIntegrationEnv) localStatePath() string {
@@ -428,14 +427,6 @@ func decodeJSON[T any](t *testing.T, output string) T {
 		t.Fatalf("decode JSON: %v\noutput: %s", err, output)
 	}
 	return value
-}
-
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func assertNoToken(t *testing.T, log string, token string) {

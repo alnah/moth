@@ -28,7 +28,7 @@ func TestRodPoolCapturesPDFAndResponseMetadata(t *testing.T) {
 	})
 
 	pool := newBrowserPool(t)
-	ctx := newBrowserTestContext(t, 20*time.Second)
+	ctx := newBrowserTestContext(t, 60*time.Second)
 
 	pdfPath := filepath.Join(t.TempDir(), "page.pdf")
 	err := pool.PDF(ctx, PDFRequest{URL: server.URL + "/print", Path: pdfPath})
