@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 )
 
@@ -46,5 +47,14 @@ func newQueuedWorkerFactory(t *testing.T, workers ...*fakeWorker) WorkerFactory 
 		worker := workers[created]
 		created++
 		return worker, nil
+	}
+}
+
+func setTestUserHome(t *testing.T, home string) {
+	t.Helper()
+
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
 	}
 }

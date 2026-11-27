@@ -3,7 +3,8 @@ package browser
 import (
 	"context"
 	"net/http"
-	"path/filepath"
+	"os"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestPDFAndResponseMetadataSerializeSameRegistrableDomain(t *testing.T) {
 		go func() {
 			firstDone <- pool.PDF(context.Background(), PDFRequest{
 				URL:  "https://docs.example.test/one",
-				Path: filepath.Join(t.TempDir(), "one.pdf"),
+				Path: os.DevNull,
 			})
 		}()
 		waitForClosed(t, firstStarted, "first PDF to start")
@@ -90,10 +91,17 @@ func TestPDFAndResponseMetadataSerializeSameRegistrableDomain(t *testing.T) {
 		go func() {
 			secondDone <- pool.PDF(context.Background(), PDFRequest{
 				URL:  "https://cdn.example.test/two",
-				Path: filepath.Join(t.TempDir(), "two.pdf"),
+				Path: os.DevNull,
 			})
 		}()
-		assertNotStartedBeforeRelease(t, secondStarted, releaseFirst)
+		waitForDomainWaiter(t, pool.domains, "https://cdn.example.test/two")
+		select {
+		case <-secondStarted:
+			close(releaseFirst)
+			t.Fatal("second PDF started while first PDF was active")
+		default:
+		}
+		close(releaseFirst)
 		assertDoneWithoutError(t, firstDone, "first PDF")
 		assertDoneWithoutError(t, secondDone, "second PDF")
 	})
@@ -236,7 +244,26 @@ func assertDoneWithoutError(t *testing.T, done <-chan error, operation string) {
 		if err != nil {
 			t.Fatalf("%s error = %v, want nil", operation, err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatalf("timed out waiting for %s", operation)
+	}
+}
+
+func waitForDomainWaiter(t *testing.T, scheduler *domainScheduler, rawURL string) {
+	t.Helper()
+
+	key := registrableDomainKey(rawURL)
+	deadline := time.Now().Add(time.Second)
+	for {
+		scheduler.mu.Lock()
+		waiters := len(scheduler.waiters[key])
+		scheduler.mu.Unlock()
+		if waiters > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("domain scheduler did not register a waiter for %q", key)
+		}
+		runtime.Gosched()
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -227,7 +228,7 @@ func TestExtractResolvesDefaultToolPaths(t *testing.T) {
 	writeFakeExecutable(t, toolsDir, tools.ToolTesseract)
 	runner := newFakePDFRunner([]string{"", "Text recovered through resolved tools."})
 	extractor := New(Options{Runner: runner, TempDir: "", OCRAllowed: true})
-	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PATH", toolsDir)
 
 	got, err := extractor.Extract(context.Background(), inputPDF)
 	if err != nil {
@@ -392,7 +393,7 @@ func (runner *failingOCRRunner) Run(ctx context.Context, command tools.Command) 
 func writeFakeExecutable(t *testing.T, dir string, name tools.ToolName) string {
 	t.Helper()
 
-	path := filepath.Join(dir, string(name))
+	path := filepath.Join(dir, fakeExecutableName(name))
 	//nolint:gosec // Test fixture must be executable for PATH resolution.
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake executable: %v", err)
@@ -542,4 +543,13 @@ func lastArg(args []string) string {
 		return ""
 	}
 	return args[len(args)-1]
+}
+
+func fakeExecutableName(name tools.ToolName) string {
+	base := string(name)
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(base), ".exe") {
+		return base + ".exe"
+	}
+
+	return base
 }

@@ -311,7 +311,7 @@ func TestPersistentServiceDelegatesStatelessOperationsAndReportsUnavailableCapab
 
 func TestDefaultStateDirsUseHomeMothBrowserForGlobalState(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 
 	stateDirs := defaultStateDirs()
 
