@@ -49,6 +49,9 @@ type Server struct {
 	closeOnce sync.Once
 	closeErr  error
 
+	callCtx     context.Context
+	cancelCalls context.CancelFunc
+
 	shutdownOnce sync.Once
 	shutdownCh   chan struct{}
 }
@@ -76,6 +79,7 @@ func NewServer(options ServerOptions) *Server {
 			return browser.NewPersistentService(options)
 		}
 	}
+	callCtx, cancelCalls := context.WithCancel(context.Background())
 	server := &Server{
 		version:           options.Version,
 		token:             options.Token,
@@ -89,6 +93,8 @@ func NewServer(options ServerOptions) *Server {
 		browsers:          make(map[browserServiceKey]*browser.PersistentService),
 		handlers:          make(map[string]methodHandler),
 		lastActivity:      startedAt,
+		callCtx:           callCtx,
+		cancelCalls:       cancelCalls,
 		shutdownCh:        make(chan struct{}),
 	}
 	server.handlers[MethodHealth] = server.handleHealth
@@ -152,6 +158,7 @@ func (server *Server) Shutdown(context.Context) error {
 // Close releases browser resources owned by the server.
 func (server *Server) Close() error {
 	server.closeOnce.Do(func() {
+		server.cancelCalls()
 		server.closed.Store(true)
 		server.browserMu.Lock()
 		ctx, cancel := context.WithTimeout(context.Background(), defaultServerTimeout)
@@ -182,10 +189,21 @@ func (server *Server) requestShutdown() {
 	})
 }
 
+func (server *Server) callContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(server.callCtx, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
 func (server *Server) handleCall(writer http.ResponseWriter, request *http.Request) {
 	recorder := &statusRecorder{ResponseWriter: writer}
 	writer = recorder
 	started := server.clock()
+	ctx, cancel := server.callContext(request.Context())
+	defer cancel()
 	var call Call
 	errorCode := ""
 	defer func() {
@@ -238,7 +256,7 @@ func (server *Server) handleCall(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	result, err := server.dispatch(request.Context(), requestMetadataFrom(request), call)
+	result, err := server.dispatch(ctx, requestMetadataFrom(request), call)
 	if err != nil {
 		code := CodeMethodFailed
 		switch {
