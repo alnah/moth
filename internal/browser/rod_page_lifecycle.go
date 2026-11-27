@@ -57,7 +57,9 @@ func (worker *rodWorker) newLoadedPage(
 		return nil, err
 	}
 
-	page, err := worker.browser.Context(ctx).Page(proto.TargetCreateTarget{URL: "about:blank"})
+	// Create the cached page with the long-lived worker browser. Request
+	// contexts are applied to the page clone used for navigation below.
+	page, err := worker.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
