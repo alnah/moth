@@ -11,47 +11,21 @@ import (
 	"testing"
 )
 
-//nolint:gocyclo // The integration scenario keeps each protocol step explicit.
 func TestBrowserCLIRealLifecycle(t *testing.T) {
 	env := newBrowserIntegrationEnv(t)
 	env.requireBrowser(t)
 	server := newIntegrationPageServer(t)
-
-	started := env.run(t, "browser", "start", "--local", "--pretty")
-	if started.Err != nil {
-		t.Fatalf("browser start: %v\nstdout: %s\nstderr: %s", started.Err, started.Stdout, started.Stderr)
-	}
-	status := decodeJSON[browserStatusEnvelope](t, started.Stdout)
-	if status.Type != "browser_status" || status.Status.Status != "running" {
-		t.Fatalf("browser start = %#v, want running status", status)
-	}
-	if !status.Status.Owned || status.Status.ChromePID <= 0 || status.Status.Scope != "local" {
-		t.Fatalf("browser start status = %#v, want owned local Chrome", status.Status)
-	}
-
-	runtimeState := env.waitRuntime(t)
-	if runtimeState.PID == os.Getpid() {
-		t.Fatal("daemon pid equals test pid, want detached child")
-	}
-	state := env.waitState(t)
-	if state.ChromePID != status.Status.ChromePID || !state.Owned {
-		t.Fatalf("state = %#v, want owned Chrome %d", state, status.Status.ChromePID)
-	}
-	tree := env.assertOwnedTree(t, runtimeState, state)
+	browser := startRealBrowser(t, env)
 
 	current := env.run(t, "browser", "status", "--local", "--pretty")
-	if current.Err != nil {
-		t.Fatalf("browser status: %v\nstdout: %s\nstderr: %s", current.Err, current.Stdout, current.Stderr)
-	}
+	requireCommandSuccess(t, "browser status", current)
 	currentStatus := decodeJSON[browserStatusEnvelope](t, current.Stdout)
-	if currentStatus.Status.Status != "running" || currentStatus.Status.ChromePID != state.ChromePID {
-		t.Fatalf("browser status = %#v, want running Chrome %d", currentStatus.Status, state.ChromePID)
+	if currentStatus.Status.Status != "running" || currentStatus.Status.ChromePID != browser.State.ChromePID {
+		t.Fatalf("browser status = %#v, want running Chrome %d", currentStatus.Status, browser.State.ChromePID)
 	}
 
 	health := env.run(t, "daemon", "status", "--pretty")
-	if health.Err != nil {
-		t.Fatalf("daemon status: %v\nstdout: %s\nstderr: %s", health.Err, health.Stdout, health.Stderr)
-	}
+	requireCommandSuccess(t, "daemon status", health)
 	healthDocument := decodeJSON[daemonStatusEnvelope](t, health.Stdout)
 	if healthDocument.Status != "running" || healthDocument.Health == nil || healthDocument.Health.ActiveBrowsers != 1 {
 		t.Fatalf("daemon status = %#v, want one active browser", healthDocument)
@@ -59,18 +33,14 @@ func TestBrowserCLIRealLifecycle(t *testing.T) {
 
 	pageURL := server.URL + "/page"
 	opened := env.run(t, "browser", "open", pageURL, "--pretty")
-	if opened.Err != nil {
-		t.Fatalf("browser open: %v\nstdout: %s\nstderr: %s", opened.Err, opened.Stdout, opened.Stderr)
-	}
+	requireCommandSuccess(t, "browser open", opened)
 	page := decodeJSON[browserPageEnvelope](t, opened.Stdout)
 	if page.Page.Title != "Moth integration page" || !page.Page.Active {
 		t.Fatalf("browser open page = %#v, want active integration page", page.Page)
 	}
 
 	pages := env.run(t, "browser", "pages", "--pretty")
-	if pages.Err != nil {
-		t.Fatalf("browser pages: %v\nstdout: %s\nstderr: %s", pages.Err, pages.Stdout, pages.Stderr)
-	}
+	requireCommandSuccess(t, "browser pages", pages)
 	pagesDocument := decodeJSON[browserPagesEnvelope](t, pages.Stdout)
 	if len(pagesDocument.Pages) != 1 || !pagesDocument.Pages[0].Active {
 		t.Fatalf("browser pages = %#v, want one active page", pagesDocument.Pages)
@@ -78,32 +48,15 @@ func TestBrowserCLIRealLifecycle(t *testing.T) {
 
 	screenshotPath := filepath.Join(env.Work, "page.png")
 	screenshot := env.run(t, "browser", "screenshot", pageURL, screenshotPath, "--pretty")
-	if screenshot.Err != nil {
-		t.Fatalf("browser screenshot: %v\nstdout: %s\nstderr: %s", screenshot.Err, screenshot.Stdout, screenshot.Stderr)
-	}
+	requireCommandSuccess(t, "browser screenshot", screenshot)
 	assertNonEmptyFile(t, screenshotPath)
 
 	pdfPath := filepath.Join(env.Work, "page.pdf")
 	pdf := env.run(t, "browser", "pdf", pageURL, pdfPath, "--pretty")
-	if pdf.Err != nil {
-		t.Fatalf("browser pdf: %v\nstdout: %s\nstderr: %s", pdf.Err, pdf.Stdout, pdf.Stderr)
-	}
+	requireCommandSuccess(t, "browser pdf", pdf)
 	assertFilePrefix(t, pdfPath, "%PDF")
 
-	stopped := env.run(t, "daemon", "stop", "--pretty")
-	if stopped.Err != nil {
-		t.Fatalf("daemon stop: %v\nstdout: %s\nstderr: %s", stopped.Err, stopped.Stdout, stopped.Stderr)
-	}
-	stopDocument := decodeJSON[daemonStatusEnvelope](t, stopped.Stdout)
-	if stopDocument.Status != "stopped" {
-		t.Fatalf("daemon stop status = %q, want stopped", stopDocument.Status)
-	}
-
-	env.waitRuntimeGone(t)
-	env.waitStateGone(t)
-	waitProcessGone(t, tree.Chrome.PID)
-	waitProcessGone(t, tree.Guard.PID)
-	env.assertNoTestChrome(t)
+	stopDaemonAndWait(t, env, browser.Tree)
 
 	logPath := filepath.Join(env.Home, ".moth", "log", "daemon.log")
 	logData, err := os.ReadFile(logPath) //nolint:gosec // Test path is isolated under Home.
@@ -116,7 +69,7 @@ func TestBrowserCLIRealLifecycle(t *testing.T) {
 			t.Fatalf("daemon log missing %q", message)
 		}
 	}
-	assertNoToken(t, logText, runtimeState.Token)
+	assertNoToken(t, logText, browser.Runtime.Token)
 }
 
 func newIntegrationPageServer(t *testing.T) *httptest.Server {

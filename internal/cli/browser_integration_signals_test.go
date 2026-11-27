@@ -40,89 +40,49 @@ func TestFetchBrowserSurvivesCLISIGKILL(t *testing.T) {
 		t.Fatal("pool guard died after CLI SIGKILL")
 	}
 
-	stopped := env.run(t, "daemon", "stop", "--pretty")
-	if stopped.Err != nil {
-		t.Fatalf("daemon stop: %v\nstdout: %s\nstderr: %s", stopped.Err, stopped.Stdout, stopped.Stderr)
-	}
-	env.waitRuntimeGone(t)
-	waitProcessGone(t, tree.Chrome.PID)
-	waitProcessGone(t, tree.Guard.PID)
-	env.assertNoTestChrome(t)
+	stopDaemonAndWait(t, env, tree)
 }
 
 func TestDaemonSIGTERMKillsOwnedChrome(t *testing.T) {
 	env := newBrowserIntegrationEnv(t)
 	env.requireBrowser(t)
+	browser := startRealBrowser(t, env)
 
-	started := env.run(t, "browser", "start", "--local", "--pretty")
-	if started.Err != nil {
-		t.Fatalf("browser start: %v\nstdout: %s\nstderr: %s", started.Err, started.Stdout, started.Stderr)
-	}
-	runtimeState := env.waitRuntime(t)
-	state := env.waitState(t)
-	tree := env.assertOwnedTree(t, runtimeState, state)
-	if err := syscall.Kill(runtimeState.PID, syscall.SIGTERM); err != nil {
+	if err := syscall.Kill(browser.Runtime.PID, syscall.SIGTERM); err != nil {
 		t.Fatalf("send SIGTERM to daemon: %v", err)
 	}
 
-	env.waitRuntimeGone(t)
-	env.waitStateGone(t)
-	waitProcessGone(t, tree.Chrome.PID)
-	waitProcessGone(t, tree.Guard.PID)
-	env.assertNoTestChrome(t)
+	waitDaemonGone(t, env, browser.Tree)
 }
 
 func TestDaemonSIGKILLGuardKillsOwnedChrome(t *testing.T) {
 	env := newBrowserIntegrationEnv(t)
 	env.requireBrowser(t)
+	oldBrowser := startRealBrowser(t, env)
 
-	started := env.run(t, "browser", "start", "--local", "--pretty")
-	if started.Err != nil {
-		t.Fatalf("browser start: %v\nstdout: %s\nstderr: %s", started.Err, started.Stdout, started.Stderr)
-	}
-	oldRuntime := env.waitRuntime(t)
-	oldState := env.waitState(t)
-	oldTree := env.assertOwnedTree(t, oldRuntime, oldState)
-	if err := syscall.Kill(oldRuntime.PID, syscall.SIGKILL); err != nil {
+	if err := syscall.Kill(oldBrowser.Runtime.PID, syscall.SIGKILL); err != nil {
 		t.Fatalf("send SIGKILL to daemon: %v", err)
 	}
-
-	waitProcessGone(t, oldTree.Chrome.PID)
-	waitProcessGone(t, oldTree.Guard.PID)
+	waitProcessGone(t, oldBrowser.Tree.Chrome.PID)
+	waitProcessGone(t, oldBrowser.Tree.Guard.PID)
 	if _, err := os.Stat(env.localStatePath()); err != nil {
 		t.Fatalf("state after daemon SIGKILL error = %v, want preserved", err)
 	}
 
 	status := env.run(t, "browser", "status", "--local", "--pretty")
-	if status.Err != nil {
-		t.Fatalf("browser status after SIGKILL: %v\nstdout: %s\nstderr: %s", status.Err, status.Stdout, status.Stderr)
-	}
+	requireCommandSuccess(t, "browser status after SIGKILL", status)
 	statusDocument := decodeJSON[browserStatusEnvelope](t, status.Stdout)
 	if statusDocument.Status.Status != "stale" {
 		t.Fatalf("browser status after SIGKILL = %q, want stale", statusDocument.Status.Status)
 	}
 
-	restarted := env.run(t, "browser", "start", "--local", "--pretty")
-	if restarted.Err != nil {
-		t.Fatalf("browser start after SIGKILL: %v\nstdout: %s\nstderr: %s", restarted.Err, restarted.Stdout, restarted.Stderr)
+	restarted := startRealBrowser(t, env)
+	if restarted.Status.Status.ChromePID == oldBrowser.State.ChromePID {
+		t.Fatalf("restarted browser = %#v, want new running Chrome", restarted.Status.Status)
 	}
-	restartedDocument := decodeJSON[browserStatusEnvelope](t, restarted.Stdout)
-	if restartedDocument.Status.Status != "running" || restartedDocument.Status.ChromePID == oldState.ChromePID {
-		t.Fatalf("restarted browser = %#v, want new running Chrome", restartedDocument.Status)
-	}
-	newState := env.waitState(t)
-	if newState.ChromePID != restartedDocument.Status.ChromePID || !newState.Owned {
-		t.Fatalf("new state = %#v, want Chrome %d", newState, restartedDocument.Status.ChromePID)
-	}
-	if !strings.HasSuffix(newState.DataDir, "/.moth/browser/chrome-data") {
-		t.Fatalf("new data dir = %q, want test profile", newState.DataDir)
+	if !strings.HasSuffix(restarted.State.DataDir, "/.moth/browser/chrome-data") {
+		t.Fatalf("new data dir = %q, want test profile", restarted.State.DataDir)
 	}
 
-	if stopped := env.run(t, "daemon", "stop", "--pretty"); stopped.Err != nil {
-		t.Fatalf("daemon stop: %v\nstdout: %s\nstderr: %s", stopped.Err, stopped.Stdout, stopped.Stderr)
-	}
-	env.waitRuntimeGone(t)
-	env.waitStateGone(t)
-	waitProcessGone(t, newState.ChromePID)
-	env.assertNoTestChrome(t)
+	stopDaemonAndWait(t, env, restarted.Tree)
 }
