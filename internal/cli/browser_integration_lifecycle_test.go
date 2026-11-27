@@ -72,6 +72,37 @@ func TestBrowserCLIRealLifecycle(t *testing.T) {
 	assertNoToken(t, logText, browser.Runtime.Token)
 }
 
+func TestBrowserStopClosesOwnedChrome(t *testing.T) {
+	env := newBrowserIntegrationEnv(t)
+	env.requireBrowser(t)
+	browser := startRealBrowser(t, env)
+
+	stopped := env.run(t, "browser", "stop", "--local", "--pretty")
+	requireCommandSuccess(t, "browser stop", stopped)
+	stopDocument := decodeJSON[browserStatusEnvelope](t, stopped.Stdout)
+	if stopDocument.Status.Status != "stopped" || !stopDocument.Status.Owned {
+		t.Fatalf("browser stop = %#v, want stopped owned browser", stopDocument.Status)
+	}
+
+	env.waitStateGone(t)
+	waitProcessGone(t, browser.Tree.Chrome.PID)
+	waitProcessGone(t, browser.Tree.Guard.PID)
+	env.assertNoTestChrome(t)
+
+	current := env.waitRuntime(t)
+	if current.PID != browser.Runtime.PID {
+		t.Fatalf("daemon pid after browser stop = %d, want %d", current.PID, browser.Runtime.PID)
+	}
+	status := env.run(t, "browser", "status", "--local", "--pretty")
+	requireCommandSuccess(t, "browser status after stop", status)
+	statusDocument := decodeJSON[browserStatusEnvelope](t, status.Stdout)
+	if statusDocument.Status.Status != "missing" {
+		t.Fatalf("browser status after stop = %q, want missing", statusDocument.Status.Status)
+	}
+
+	stopDaemonAndWait(t, env, browser.Tree)
+}
+
 func newIntegrationPageServer(t *testing.T) *httptest.Server {
 	t.Helper()
 

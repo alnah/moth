@@ -143,11 +143,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Browser tests
-        run: go test -tags browser ./internal/browser
+        run: go test -p 1 -tags browser -count=1 ./internal/browser ./internal/cli
 
       - name: Browser coverage
         run: |
-          go test -tags browser -coverprofile=coverage-browser.out ./...
+          go test -p 1 -tags browser -coverprofile=coverage-browser.out ./...
           go tool cover -func=coverage-browser.out
 
       - name: Upload browser coverage to Codecov

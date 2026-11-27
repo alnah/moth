@@ -63,7 +63,7 @@ test-race: ## Run race tests.
 
 .PHONY: test-browser
 test-browser: ## Run browser-tag integration tests with a required browser.
-	$(BROWSER_TEST_ENV) $(GO) test -tags browser ./internal/browser
+	$(BROWSER_TEST_ENV) $(GO) test -p 1 -tags browser -count=1 ./internal/browser ./internal/cli
 
 .PHONY: test-integration
 test-integration: ## Run optional integration tests that require external tools.
@@ -76,7 +76,7 @@ cover: ## Run coverage and print summary.
 
 .PHONY: cover-browser
 cover-browser: ## Run browser-tag coverage and print summary.
-	$(GO) test -tags browser -coverprofile=coverage-browser.out ./...
+	$(GO) test -p 1 -tags browser -coverprofile=coverage-browser.out ./...
 	$(GO) tool cover -func=coverage-browser.out
 
 .PHONY: build
