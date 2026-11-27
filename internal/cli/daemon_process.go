@@ -49,6 +49,7 @@ func daemonCommand(ctx context.Context, spec supervisor.DaemonSpec) (*exec.Cmd, 
 var daemonEnvironmentAllowlist = map[string]struct{}{
 	"PATH":            {},
 	"HOME":            {},
+	"USERPROFILE":     {},
 	"USER":            {},
 	"LOGNAME":         {},
 	"SHELL":           {},

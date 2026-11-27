@@ -55,6 +55,7 @@ func TestDaemonEnvironmentFiltersSecrets(t *testing.T) {
 	got := daemonEnvironment([]string{
 		"PATH=/usr/bin",
 		"HOME=/Users/alnah",
+		"USERPROFILE=/Users/alnah",
 		"DISPLAY=:0",
 		"ROD_NO_SANDBOX=1",
 		"BRAVE_API_KEY=secret",
@@ -63,7 +64,7 @@ func TestDaemonEnvironmentFiltersSecrets(t *testing.T) {
 		"PODCAST_INDEX_API_SECRET=secret",
 	})
 
-	allowed := []string{"PATH=/usr/bin", "HOME=/Users/alnah", "DISPLAY=:0", "ROD_NO_SANDBOX=1"}
+	allowed := []string{"PATH=/usr/bin", "HOME=/Users/alnah", "USERPROFILE=/Users/alnah", "DISPLAY=:0", "ROD_NO_SANDBOX=1"}
 	for _, value := range allowed {
 		if !containsEnv(got, value) {
 			t.Fatalf("environment = %#v, want %q", got, value)
